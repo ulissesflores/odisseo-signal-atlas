@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -94,14 +93,21 @@ def _build_windows(
         raise ValueError("window_hours must be >= 1")
 
     current = (now or datetime.now(UTC)).astimezone(UTC)
-    anchor = current.replace(minute=0, second=0, microsecond=0)
-    window_count = max(1, math.ceil((lookback_days * 24) / window_hours))
-
+    current_mark = current.replace(minute=0, second=0, microsecond=0)
+    boundary_hour = (current_mark.hour // window_hours) * window_hours
+    boundary = current_mark.replace(hour=boundary_hour)
+    cutoff = current_mark - timedelta(days=lookback_days)
     windows: list[tuple[datetime, datetime, bool]] = []
-    for index in range(window_count):
-        end_time = anchor - timedelta(hours=index * window_hours)
+    if allow_live_window and boundary < current_mark:
+        windows.append((boundary, current_mark, True))
+
+    end_time = boundary
+    while end_time > cutoff:
         start_time = end_time - timedelta(hours=window_hours)
-        windows.append((start_time, end_time, allow_live_window and index == 0))
+        if start_time < cutoff:
+            start_time = cutoff
+        windows.append((start_time, end_time, False))
+        end_time = start_time
     return windows
 
 
