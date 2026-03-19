@@ -40,6 +40,13 @@ def test_fetch_repo_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     client.close()
 
 
+def test_github_client_enables_redirect_following() -> None:
+    client = GitHubClient(token=None)
+
+    assert client.http.follow_redirects is True
+    client.close()
+
+
 def test_fetch_repo_raises_on_missing_repository(monkeypatch: pytest.MonkeyPatch) -> None:
     client = GitHubClient(token=None)
     monkeypatch.setattr(

@@ -21,7 +21,11 @@ class GitHubClient:
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        self.http = httpx.Client(timeout=timeout, headers=headers)
+        self.http = httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            follow_redirects=True,
+        )
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -76,4 +80,3 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
