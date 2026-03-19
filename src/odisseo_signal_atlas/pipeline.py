@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import OrderedDict
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import Settings, load_settings
+from .exceptions import RateLimitError
 from .exporters import write_markdown
 from .github_client import GitHubClient
-from .models import PipelineReport, QuerySpec, RepoCandidate, RepoRecord
+from .models import PipelineReport, QuerySpec, RepoCandidate, RepoRecord, TweetHit
 from .normalizers import extract_repo_urls, to_iso
 from .query_builder import build_queries
 from .query_state import QueryHistoryStore
@@ -27,7 +30,11 @@ class OdisseoSignalAtlasPipeline:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.x_client = XClient(settings.x_bearer_token, settings.x_search_endpoint)
+        self.x_client = XClient(
+            settings.x_bearer_token,
+            settings.x_search_endpoint,
+            min_request_interval_seconds=settings.x_min_request_interval_seconds,
+        )
         self.github_client = GitHubClient(settings.github_token)
 
     @classmethod
@@ -54,10 +61,14 @@ class OdisseoSignalAtlasPipeline:
             self.settings.query_history_file,
             retention_days=self.settings.query_history_retention_days,
         )
-        candidates: OrderedDict[str, RepoCandidate] = OrderedDict()
+        candidates = self._load_candidates(self.settings.cache_dir / "candidates.json")
         total_tweets = 0
         skipped_queries = 0
         executed_queries = 0
+        self._write_json(
+            self.settings.cache_dir / "query_plan.json",
+            self._serialize_queries(queries),
+        )
 
         for query_spec in queries:
             if history.should_skip(
@@ -78,13 +89,7 @@ class OdisseoSignalAtlasPipeline:
                 query_spec.topic_label,
                 query_spec.window_label,
             )
-            tweets = self.x_client.search(
-                query=query_spec.query,
-                max_results_per_page=self.settings.x_max_results_per_page,
-                max_pages=self.settings.x_pages_per_query,
-                start_time=query_spec.start_time,
-                end_time=query_spec.end_time,
-            )
+            tweets = self._search_with_backoff(query_spec)
             history.mark_complete(query_spec, len(tweets))
             executed_queries += 1
             total_tweets += len(tweets)
@@ -95,6 +100,7 @@ class OdisseoSignalAtlasPipeline:
                         RepoCandidate(repo_url=repo_url, repo_slug=repo_slug),
                     )
                     candidate.absorb(tweet, query_spec.topic_label, query_spec.language.code)
+            self._persist_progress(history, candidates)
 
         ranked = self._enrich_and_rank(candidates)
         limit = target_repos or self.settings.target_repos
@@ -127,6 +133,34 @@ class OdisseoSignalAtlasPipeline:
             site_url=self.settings.site_url,
         )
 
+    def _search_with_backoff(self, query_spec: QuerySpec) -> list[TweetHit]:
+        """Execute a query and wait for the X reset window when rate-limited."""
+
+        while True:
+            try:
+                return self.x_client.search(
+                    query=query_spec.query,
+                    max_results_per_page=self.settings.x_max_results_per_page,
+                    max_pages=self.settings.x_pages_per_query,
+                    start_time=query_spec.start_time,
+                    end_time=query_spec.end_time,
+                )
+            except RateLimitError as exc:
+                wait_seconds = max(
+                    self.settings.x_rate_limit_default_wait_seconds,
+                    exc.retry_after_seconds,
+                )
+                wait_seconds = min(wait_seconds, self.settings.x_rate_limit_max_wait_seconds)
+                LOGGER.warning(
+                    "rate limited language=%s topic=%s window=%s wait_seconds=%s reset_at=%s",
+                    query_spec.language.code,
+                    query_spec.topic_label,
+                    query_spec.window_label,
+                    wait_seconds,
+                    to_iso(exc.reset_at),
+                )
+                time.sleep(wait_seconds)
+
     def _enrich_and_rank(self, candidates: OrderedDict[str, RepoCandidate]) -> list[RepoRecord]:
         """Enrich candidates with GitHub metadata and sort by score."""
 
@@ -148,6 +182,43 @@ class OdisseoSignalAtlasPipeline:
         filtered.sort(key=lambda repo: repo.score, reverse=True)
         return filtered
 
+    def _load_candidates(self, path: Path) -> OrderedDict[str, RepoCandidate]:
+        """Load previously discovered candidates so interrupted runs can resume."""
+
+        candidates: OrderedDict[str, RepoCandidate] = OrderedDict()
+        if not path.exists():
+            return candidates
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return candidates
+
+        for slug, value in payload.items():
+            if not isinstance(slug, str) or not isinstance(value, dict):
+                continue
+            repo_url = value.get("repo_url")
+            if not isinstance(repo_url, str) or not repo_url:
+                continue
+            source_tweets = [
+                self._deserialize_tweet(item)
+                for item in value.get("source_tweets", [])
+                if isinstance(item, dict)
+            ]
+            candidates[slug] = RepoCandidate(
+                repo_url=repo_url,
+                repo_slug=slug,
+                source_tweets=[tweet for tweet in source_tweets if tweet is not None],
+                source_languages={
+                    language
+                    for language in value.get("source_languages", [])
+                    if isinstance(language, str)
+                },
+                matched_topics={
+                    topic for topic in value.get("matched_topics", []) if isinstance(topic, str)
+                },
+            )
+        return candidates
+
     def _serialize_candidates(
         self,
         candidates: OrderedDict[str, RepoCandidate],
@@ -159,7 +230,9 @@ class OdisseoSignalAtlasPipeline:
                 "repo_url": candidate.repo_url,
                 "source_languages": sorted(candidate.source_languages),
                 "matched_topics": sorted(candidate.matched_topics),
-                "tweet_ids": [tweet.tweet_id for tweet in candidate.source_tweets],
+                "source_tweets": [
+                    self._serialize_tweet(tweet) for tweet in candidate.source_tweets
+                ],
             }
             for slug, candidate in candidates.items()
         }
@@ -200,3 +273,72 @@ class OdisseoSignalAtlasPipeline:
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _persist_progress(
+        self,
+        history: QueryHistoryStore,
+        candidates: OrderedDict[str, RepoCandidate],
+    ) -> None:
+        """Persist resumable state after each completed query."""
+
+        history.save()
+        self._write_json(
+            self.settings.cache_dir / "candidates.json",
+            self._serialize_candidates(candidates),
+        )
+
+    def _serialize_tweet(self, tweet: TweetHit) -> dict[str, Any]:
+        """Serialize a tweet hit for resumable candidate cache storage."""
+
+        return {
+            "tweet_id": tweet.tweet_id,
+            "text": tweet.text,
+            "lang": tweet.lang,
+            "created_at": to_iso(tweet.created_at),
+            "public_metrics": tweet.public_metrics,
+            "author_username": tweet.author_username,
+            "expanded_urls": tweet.expanded_urls,
+            "matched_query": tweet.matched_query,
+        }
+
+    def _deserialize_tweet(self, payload: dict[str, Any]) -> TweetHit | None:
+        """Rebuild a cached tweet hit from JSON-safe payload data."""
+
+        tweet_id = payload.get("tweet_id")
+        text = payload.get("text")
+        if not isinstance(tweet_id, str) or not isinstance(text, str):
+            return None
+        created_at = payload.get("created_at")
+        public_metrics_raw = payload.get("public_metrics")
+        public_metrics = (
+            {
+                key: value
+                for key, value in public_metrics_raw.items()
+                if isinstance(key, str) and isinstance(value, int)
+            }
+            if isinstance(public_metrics_raw, dict)
+            else {}
+        )
+        return TweetHit(
+            tweet_id=tweet_id,
+            text=text,
+            lang=payload.get("lang") if isinstance(payload.get("lang"), str) else None,
+            created_at=self._parse_cached_datetime(created_at),
+            public_metrics=public_metrics,
+            author_username=payload.get("author_username")
+            if isinstance(payload.get("author_username"), str)
+            else None,
+            expanded_urls=[
+                url for url in payload.get("expanded_urls", []) if isinstance(url, str)
+            ],
+            matched_query=payload.get("matched_query")
+            if isinstance(payload.get("matched_query"), str)
+            else None,
+        )
+
+    def _parse_cached_datetime(self, value: Any) -> datetime | None:
+        """Parse an optional cached ISO datetime."""
+
+        if not isinstance(value, str) or not value:
+            return None
+        return datetime.fromisoformat(value)

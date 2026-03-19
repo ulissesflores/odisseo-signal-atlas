@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from .exceptions import RemoteAPIError
+from .exceptions import RateLimitError, RemoteAPIError
 from .models import TweetHit
 
 
 class XClient:
     """Thin client around the X recent search API."""
 
-    def __init__(self, bearer_token: str, endpoint: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        bearer_token: str,
+        endpoint: str,
+        timeout: float = 30.0,
+        min_request_interval_seconds: float = 0.0,
+    ) -> None:
         self.endpoint = endpoint
+        self.min_request_interval_seconds = max(0.0, min_request_interval_seconds)
+        self._last_request_at_monotonic: float | None = None
         self.http = httpx.Client(
             timeout=timeout,
             headers={
@@ -36,9 +45,13 @@ class XClient:
         reraise=True,
     )
     def _request(self, params: dict[str, str | int]) -> dict:
+        self._wait_for_request_slot()
         response = self.http.get(self.endpoint, params=params)
+        self._last_request_at_monotonic = time.monotonic()
         if response.status_code in {401, 403}:
             raise RemoteAPIError(f"X API authentication failed: {response.text[:300]}")
+        if response.status_code == 429:
+            raise _build_rate_limit_error(response)
         response.raise_for_status()
         return response.json()
 
@@ -100,6 +113,16 @@ class XClient:
 
         return collected
 
+    def _wait_for_request_slot(self) -> None:
+        """Throttle request cadence to reduce avoidable API pressure."""
+
+        if self.min_request_interval_seconds <= 0 or self._last_request_at_monotonic is None:
+            return
+        elapsed = time.monotonic() - self._last_request_at_monotonic
+        remaining = self.min_request_interval_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+
 
 def _parse_datetime(value: str | None) -> datetime | None:
     """Parse ISO datetimes returned by remote APIs."""
@@ -113,3 +136,28 @@ def _format_x_datetime(value: datetime) -> str:
     """Serialize datetimes in the format expected by the X API."""
 
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _build_rate_limit_error(response: httpx.Response) -> RateLimitError:
+    """Build a structured rate-limit exception from X response headers."""
+
+    retry_after_seconds = 60
+    reset_at: datetime | None = None
+
+    retry_after_header = response.headers.get("retry-after")
+    if retry_after_header and retry_after_header.isdigit():
+        retry_after_seconds = max(1, int(retry_after_header))
+
+    reset_header = response.headers.get("x-rate-limit-reset")
+    if reset_header and reset_header.isdigit():
+        reset_at = datetime.fromtimestamp(int(reset_header), UTC)
+        retry_after_seconds = max(
+            retry_after_seconds,
+            int((reset_at - datetime.now(UTC)).total_seconds()) + 1,
+        )
+
+    return RateLimitError(
+        "X API rate limit exceeded.",
+        retry_after_seconds=retry_after_seconds,
+        reset_at=reset_at,
+    )

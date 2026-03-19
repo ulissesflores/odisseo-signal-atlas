@@ -8,7 +8,7 @@ Official engineering repository for the `Odisseo Signal Atlas` discovery engine 
 
 Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` API, extracts GitHub repositories from real social signals, enriches them with GitHub metadata, scores them against frontier engineering criteria, and exports a public-quality Markdown report.
 
-It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run.
+It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run. It also persists resumable candidate state and respects X rate-limit windows instead of discarding a long execution when the API asks for a cooldown.
 
 ## Public positioning
 
@@ -122,9 +122,10 @@ ODISSEO_GITHUB_TOKEN="$(gh auth token)" \
 
 The project reads environment in this order:
 
-1. `.env`
-2. `.env.<environment>`
-3. `.env.local`
+1. Process environment variables
+2. `.env.local`
+3. `.env.<environment>`
+4. `.env`
 
 `ODISSEO_ENV` defaults to `local`.
 
@@ -148,10 +149,15 @@ Recent-search control is configured with:
 - `ODISSEO_X_LOOKBACK_DAYS`
 - `ODISSEO_X_WINDOW_HOURS`
 - `ODISSEO_X_REFRESH_LIVE_WINDOW`
+- `ODISSEO_X_MIN_REQUEST_INTERVAL_SECONDS`
+- `ODISSEO_X_RATE_LIMIT_DEFAULT_WAIT_SECONDS`
+- `ODISSEO_X_RATE_LIMIT_MAX_WAIT_SECONDS`
 - `ODISSEO_QUERY_HISTORY_FILE`
 - `ODISSEO_QUERY_HISTORY_RETENTION_DAYS`
 
 The pipeline stores executed query windows in `cache/query_history.json` so older slices are skipped on subsequent runs while the newest live window can still be refreshed.
+
+Discovered candidates are also persisted incrementally in `cache/candidates.json`. That allows an interrupted or rate-limited run to resume without losing already discovered repository signals.
 
 ## Documentation
 

@@ -5,15 +5,22 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from odisseo_signal_atlas.exceptions import RemoteAPIError
+from odisseo_signal_atlas.exceptions import RateLimitError, RemoteAPIError
 from odisseo_signal_atlas.x_client import XClient
 
 
 class DummyResponse:
-    def __init__(self, status_code: int, payload: dict, text: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text or str(payload)
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -116,4 +123,25 @@ def test_search_passes_time_window_to_request(monkeypatch: pytest.MonkeyPatch) -
     assert captured[0]["max_results"] == 10
     assert "start_time" in captured[0]
     assert "end_time" in captured[0]
+    client.close()
+
+
+def test_request_raises_structured_rate_limit_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = XClient("token", "https://api.x.com/2/tweets/search/recent")
+    monkeypatch.setattr(
+        client.http,
+        "get",
+        lambda url, params: DummyResponse(
+            429,
+            {"error": "too_many_requests"},
+            headers={"retry-after": "7"},
+        ),
+    )
+
+    with pytest.raises(RateLimitError) as exc:
+        client._request({"query": "test"})
+
+    assert exc.value.retry_after_seconds == 7
     client.close()

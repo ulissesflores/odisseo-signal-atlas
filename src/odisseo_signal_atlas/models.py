@@ -73,7 +73,8 @@ class RepoCandidate:
     def absorb(self, tweet: TweetHit, topic_label: str, language_code: str) -> None:
         """Merge a new discovery event into the candidate."""
 
-        self.source_tweets.append(tweet)
+        if tweet.tweet_id not in {item.tweet_id for item in self.source_tweets}:
+            self.source_tweets.append(tweet)
         self.source_languages.add(language_code)
         self.matched_topics.add(topic_label)
 

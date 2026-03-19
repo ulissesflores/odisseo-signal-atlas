@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 from odisseo_signal_atlas.config import Settings
+from odisseo_signal_atlas.exceptions import RateLimitError
 from odisseo_signal_atlas.github_client import GitHubClient
 from odisseo_signal_atlas.models import QuerySpec, RepoRecord, SearchLanguage, TweetHit
 from odisseo_signal_atlas.pipeline import OdisseoSignalAtlasPipeline
@@ -112,9 +113,12 @@ def test_pipeline_runs_end_to_end_with_mocks(
         x_search_endpoint="https://api.x.com/2/tweets/search/recent",
         x_max_results_per_page=10,
         x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
         target_repos=10,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
@@ -178,9 +182,12 @@ def test_pipeline_skips_historical_query_windows_from_cache(
         x_search_endpoint="https://api.x.com/2/tweets/search/recent",
         x_max_results_per_page=10,
         x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
         target_repos=10,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
@@ -212,3 +219,174 @@ def test_pipeline_skips_historical_query_windows_from_cache(
     assert report.total_planned_queries == 2
     assert report.total_queries == 1
     assert report.total_skipped_queries == 1
+
+
+def test_pipeline_retries_after_rate_limit_and_persists_resume_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    language = SearchLanguage("en", "English", ("Claude Code",), ("memory",))
+    query = QuerySpec(
+        language=language,
+        topic_label="memory",
+        query="memory query",
+        window_label="20260318T0000Z-20260318T1200Z",
+        start_time=datetime(2026, 3, 18, 0, 0, tzinfo=UTC),
+        end_time=datetime(2026, 3, 18, 12, 0, tzinfo=UTC),
+        is_live_window=True,
+    )
+
+    settings = Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output/report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=10,
+        x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
+        x_lookback_days=1,
+        x_window_hours=12,
+        x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=5,
+        x_rate_limit_max_wait_seconds=30,
+        target_repos=10,
+        query_history_file=tmp_path / "cache/query_history.json",
+        query_history_retention_days=30,
+        excluded_repos=set(),
+        search_languages=[language],
+    )
+
+    calls = {"count": 0}
+
+    class RateLimitedXClient:
+        def search(
+            self,
+            query: str,
+            max_results_per_page: int = 100,
+            max_pages: int = 5,
+            start_time: datetime | None = None,
+            end_time: datetime | None = None,
+        ) -> list[TweetHit]:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RateLimitError("rate limited", retry_after_seconds=3)
+            return [
+                TweetHit(
+                    tweet_id="1",
+                    text="check https://github.com/acme/odisseo-memory",
+                    lang="en",
+                    created_at=datetime.now(UTC),
+                    public_metrics={},
+                    expanded_urls=["https://github.com/acme/odisseo-memory"],
+                )
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "odisseo_signal_atlas.pipeline.build_queries",
+        lambda *_args, **_kwargs: [query],
+    )
+    slept: list[int] = []
+    monkeypatch.setattr("odisseo_signal_atlas.pipeline.time.sleep", slept.append)
+
+    pipeline = OdisseoSignalAtlasPipeline(settings)
+    pipeline.x_client = cast(XClient, RateLimitedXClient())
+    pipeline.github_client = cast(GitHubClient, DummyGitHubClient())
+
+    report = pipeline.run(target_repos=10)
+
+    assert slept == [5]
+    assert calls["count"] == 2
+    assert report.total_queries == 1
+    assert settings.query_history_file.exists()
+    assert (settings.cache_dir / "candidates.json").exists()
+
+
+def test_pipeline_loads_candidates_from_cache_for_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    language = SearchLanguage("en", "English", ("Claude Code",), ("memory",))
+    query = QuerySpec(
+        language=language,
+        topic_label="memory",
+        query="memory query",
+        window_label="20260318T1200Z-20260319T0000Z",
+        start_time=datetime(2026, 3, 18, 12, 0, tzinfo=UTC),
+        end_time=datetime(2026, 3, 19, 0, 0, tzinfo=UTC),
+        is_live_window=True,
+    )
+
+    settings = Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output/report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=10,
+        x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
+        x_lookback_days=1,
+        x_window_hours=12,
+        x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
+        target_repos=10,
+        query_history_file=tmp_path / "cache/query_history.json",
+        query_history_retention_days=30,
+        excluded_repos=set(),
+        search_languages=[language],
+    )
+    settings.cache_dir.mkdir(parents=True, exist_ok=True)
+    (settings.cache_dir / "candidates.json").write_text(
+        json.dumps(
+            {
+                "acme/from-cache": {
+                    "repo_url": "https://github.com/acme/from-cache",
+                    "source_languages": ["en"],
+                    "matched_topics": ["memory"],
+                    "source_tweets": [
+                        {
+                            "tweet_id": "cached-1",
+                            "text": "cached https://github.com/acme/from-cache",
+                            "lang": "en",
+                            "created_at": "2026-03-19T00:00:00+00:00",
+                            "public_metrics": {},
+                            "author_username": "alice",
+                            "expanded_urls": ["https://github.com/acme/from-cache"],
+                            "matched_query": "memory query",
+                        }
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "odisseo_signal_atlas.pipeline.build_queries",
+        lambda *_args, **_kwargs: [query],
+    )
+    pipeline = OdisseoSignalAtlasPipeline(settings)
+    pipeline.x_client = cast(XClient, DummyXClient())
+    pipeline.github_client = cast(GitHubClient, DummyGitHubClient())
+
+    report = pipeline.run(target_repos=10)
+    ranked = json.loads((settings.cache_dir / "ranked.json").read_text(encoding="utf-8"))
+    slugs = {item["repo_slug"] for item in ranked}
+
+    assert report.total_candidates == 2
+    assert {"acme/from-cache", "acme/odisseo-memory"}.issubset(slugs)
