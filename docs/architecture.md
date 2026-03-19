@@ -14,13 +14,15 @@
 
 1. Load settings from `.env` files and process environment.
 2. Build multilingual X queries from seed terms, topic presets, and recent-search windows.
-3. Skip historical query slices already recorded in the local query-history cache.
-4. Search the X API, pace requests, and wait for reset windows when X returns `429`.
-5. Normalize GitHub links into canonical repository slugs.
-6. Enrich each slug with GitHub metadata.
-7. Apply exclusion rules and quality scoring.
-8. Persist query history and candidate cache after each completed query so interrupted runs can resume.
-9. Surface the result through a local CLI and CI-safe automation.
+3. Continue scanning older recent-search windows until the target or the configured backfill ceiling is reached.
+4. Skip historical query slices already recorded in the local query-history cache.
+5. Search the X API, pace requests, and wait for reset windows when X returns `429`.
+6. Normalize GitHub links into canonical repository slugs.
+7. Enrich each slug with GitHub metadata.
+8. Apply exclusion rules and quality scoring.
+9. Persist query history and candidate cache after each completed query so interrupted runs can resume.
+10. Write a Markdown snapshot for running, failed, or completed executions.
+11. Surface the result through a local CLI and CI-safe automation.
 
 ## Design constraints
 

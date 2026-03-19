@@ -37,3 +37,20 @@ def test_write_markdown_contains_canonical_site_link(tmp_path: Path) -> None:
     assert "Ulisses Flores" in content
     assert "https://ulissesflores.com" in content
     assert "Full GitHub link" in content
+
+
+def test_write_markdown_supports_progress_snapshot(tmp_path: Path) -> None:
+    output = write_markdown(
+        tmp_path / "report.md",
+        [],
+        "https://ulissesflores.com",
+        run_status="running",
+        stats={"Queries executed": 12, "Days scanned": 3},
+        notes=["Run started and is still collecting data."],
+    )
+
+    content = output.read_text(encoding="utf-8")
+
+    assert "**Run status:** running" in content
+    assert "**Queries executed:** 12" in content
+    assert "No enriched repositories are available" in content

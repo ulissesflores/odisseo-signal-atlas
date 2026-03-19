@@ -8,7 +8,7 @@ Official engineering repository for the `Odisseo Signal Atlas` discovery engine 
 
 Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` API, extracts GitHub repositories from real social signals, enriches them with GitHub metadata, scores them against frontier engineering criteria, and exports a public-quality Markdown report.
 
-It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run. It also persists resumable candidate state and respects X rate-limit windows instead of discarding a long execution when the API asks for a cooldown.
+It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run. It also persists resumable candidate state, writes a Markdown report for every run, and respects X rate-limit windows instead of discarding a long execution when the API asks for a cooldown.
 
 ## Public positioning
 
@@ -147,17 +147,21 @@ Keep real tokens only in ignored local files.
 Recent-search control is configured with:
 
 - `ODISSEO_X_LOOKBACK_DAYS`
+- `ODISSEO_X_MAX_BACKFILL_DAYS`
 - `ODISSEO_X_WINDOW_HOURS`
 - `ODISSEO_X_REFRESH_LIVE_WINDOW`
 - `ODISSEO_X_MIN_REQUEST_INTERVAL_SECONDS`
 - `ODISSEO_X_RATE_LIMIT_DEFAULT_WAIT_SECONDS`
 - `ODISSEO_X_RATE_LIMIT_MAX_WAIT_SECONDS`
+- `ODISSEO_CANDIDATE_TARGET_MULTIPLIER`
 - `ODISSEO_QUERY_HISTORY_FILE`
 - `ODISSEO_QUERY_HISTORY_RETENTION_DAYS`
 
 The pipeline stores executed query windows in `cache/query_history.json` so older slices are skipped on subsequent runs while the newest live window can still be refreshed.
 
 Discovered candidates are also persisted incrementally in `cache/candidates.json`. That allows an interrupted or rate-limited run to resume without losing already discovered repository signals.
+
+If a run does not find enough repositories within the first recent-search slice, the pipeline keeps moving backward in time until it reaches the configured backfill limit. Every run writes a Markdown file, including progress or failure snapshots when final enrichment has not completed yet.
 
 ## Documentation
 

@@ -28,11 +28,13 @@ def _settings(tmp_path: Path) -> Settings:
         x_pages_per_query=5,
         x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
+        x_max_backfill_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
         x_rate_limit_default_wait_seconds=60,
         x_rate_limit_max_wait_seconds=900,
         target_repos=500,
+        candidate_target_multiplier=1.15,
         query_history_file=tmp_path / "cache" / "query_history.json",
         query_history_retention_days=30,
         excluded_repos=set(),
@@ -62,6 +64,8 @@ class DummyPipeline:
             total_tweets=5,
             total_candidates=4,
             total_ranked=2,
+            days_scanned=1,
+            target_reached=False,
             site_url=self.settings.site_url,
         )
 

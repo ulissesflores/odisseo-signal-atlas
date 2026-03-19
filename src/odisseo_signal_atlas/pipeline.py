@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from collections import OrderedDict
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -52,64 +53,154 @@ class OdisseoSignalAtlasPipeline:
     def run(self, target_repos: int | None = None) -> PipelineReport:
         """Run the full discovery pipeline and return a structured summary."""
 
-        queries = build_queries(
-            self.settings.search_languages,
-            lookback_days=self.settings.x_lookback_days,
-            window_hours=self.settings.x_window_hours,
-        )
+        limit = target_repos or self.settings.target_repos
+        candidate_target = self._target_candidate_count(limit)
+        baseline_now = datetime.now(UTC)
         history = QueryHistoryStore.load(
             self.settings.query_history_file,
             retention_days=self.settings.query_history_retention_days,
         )
         candidates = self._load_candidates(self.settings.cache_dir / "candidates.json")
+        queries: list[QuerySpec] = []
         total_tweets = 0
         skipped_queries = 0
         executed_queries = 0
-        self._write_json(
-            self.settings.cache_dir / "query_plan.json",
-            self._serialize_queries(queries),
+        days_scanned = 0
+        self._write_report_snapshot(
+            repos=[],
+            run_status="running",
+            stats=self._build_report_stats(
+                total_planned_queries=0,
+                total_queries=0,
+                total_skipped_queries=0,
+                total_tweets=0,
+                total_candidates=len(candidates),
+                days_scanned=0,
+                target_repos=limit,
+            ),
+            notes=["Run started. The report will be updated when the execution finishes."],
         )
 
-        for query_spec in queries:
-            if history.should_skip(
-                query_spec,
-                refresh_live_window=self.settings.x_refresh_live_window,
+        try:
+            while (
+                days_scanned < self.settings.x_max_backfill_days
+                and len(candidates) < candidate_target
             ):
-                skipped_queries += 1
-                LOGGER.info(
-                    "skipping language=%s topic=%s window=%s reason=query-history",
-                    query_spec.language.code,
-                    query_spec.topic_label,
-                    query_spec.window_label,
+                batch_lookback_days = min(
+                    self.settings.x_lookback_days,
+                    self.settings.x_max_backfill_days - days_scanned,
                 )
-                continue
-            LOGGER.info(
-                "searching language=%s topic=%s window=%s",
-                query_spec.language.code,
-                query_spec.topic_label,
-                query_spec.window_label,
-            )
-            tweets = self._search_with_backoff(query_spec)
-            history.mark_complete(query_spec, len(tweets))
-            executed_queries += 1
-            total_tweets += len(tweets)
-            for tweet in tweets:
-                for repo_url, repo_slug in extract_repo_urls(tweet.text, tweet.expanded_urls):
-                    candidate = candidates.setdefault(
-                        repo_slug,
-                        RepoCandidate(repo_url=repo_url, repo_slug=repo_slug),
+                batch_queries = build_queries(
+                    self.settings.search_languages,
+                    now=baseline_now - timedelta(days=days_scanned),
+                    lookback_days=batch_lookback_days,
+                    window_hours=self.settings.x_window_hours,
+                    allow_live_window=days_scanned == 0,
+                )
+                queries.extend(batch_queries)
+                self._write_json(
+                    self.settings.cache_dir / "query_plan.json",
+                    self._serialize_queries(queries),
+                )
+
+                for query_spec in batch_queries:
+                    if history.should_skip(
+                        query_spec,
+                        refresh_live_window=self.settings.x_refresh_live_window,
+                    ):
+                        skipped_queries += 1
+                        LOGGER.info(
+                            "skipping language=%s topic=%s window=%s reason=query-history",
+                            query_spec.language.code,
+                            query_spec.topic_label,
+                            query_spec.window_label,
+                        )
+                        continue
+                    LOGGER.info(
+                        "searching language=%s topic=%s window=%s",
+                        query_spec.language.code,
+                        query_spec.topic_label,
+                        query_spec.window_label,
                     )
-                    candidate.absorb(tweet, query_spec.topic_label, query_spec.language.code)
-            self._persist_progress(history, candidates)
+                    tweets = self._search_with_backoff(query_spec)
+                    history.mark_complete(query_spec, len(tweets))
+                    executed_queries += 1
+                    total_tweets += len(tweets)
+                    for tweet in tweets:
+                        for repo_url, repo_slug in extract_repo_urls(
+                            tweet.text,
+                            tweet.expanded_urls,
+                        ):
+                            candidate = candidates.setdefault(
+                                repo_slug,
+                                RepoCandidate(repo_url=repo_url, repo_slug=repo_slug),
+                            )
+                            candidate.absorb(
+                                tweet,
+                                query_spec.topic_label,
+                                query_spec.language.code,
+                            )
+                    self._persist_progress(history, candidates)
+
+                days_scanned += batch_lookback_days
+                self._write_report_snapshot(
+                    repos=[],
+                    run_status="running",
+                    stats=self._build_report_stats(
+                        total_planned_queries=len(queries),
+                        total_queries=executed_queries,
+                        total_skipped_queries=skipped_queries,
+                        total_tweets=total_tweets,
+                        total_candidates=len(candidates),
+                        days_scanned=days_scanned,
+                        target_repos=limit,
+                    ),
+                    notes=[
+                        (
+                            "Progress snapshot only. The final ranked report is written after "
+                            "GitHub enrichment finishes."
+                        ),
+                    ],
+                )
+        except Exception as exc:
+            self._write_report_snapshot(
+                repos=[],
+                run_status="failed",
+                stats=self._build_report_stats(
+                    total_planned_queries=len(queries),
+                    total_queries=executed_queries,
+                    total_skipped_queries=skipped_queries,
+                    total_tweets=total_tweets,
+                    total_candidates=len(candidates),
+                    days_scanned=days_scanned,
+                    target_repos=limit,
+                ),
+                notes=[f"Run stopped before final enrichment. Reason: {exc}"],
+            )
+            raise
 
         ranked = self._enrich_and_rank(candidates)
-        limit = target_repos or self.settings.target_repos
         ranked = ranked[:limit]
+        target_reached = len(ranked) >= limit
 
-        output_path = write_markdown(
-            self.settings.output_file,
-            ranked,
-            self.settings.site_url,
+        output_path = self._write_report_snapshot(
+            repos=ranked,
+            run_status="complete",
+            stats=self._build_report_stats(
+                total_planned_queries=len(queries),
+                total_queries=executed_queries,
+                total_skipped_queries=skipped_queries,
+                total_tweets=total_tweets,
+                total_candidates=len(candidates),
+                days_scanned=days_scanned,
+                target_repos=limit,
+            ),
+            notes=self._build_completion_notes(
+                target_reached=target_reached,
+                target_repos=limit,
+                total_ranked=len(ranked),
+                days_scanned=days_scanned,
+            ),
         )
         self._write_json(
             self.settings.cache_dir / "candidates.json",
@@ -130,6 +221,8 @@ class OdisseoSignalAtlasPipeline:
             total_tweets=total_tweets,
             total_candidates=len(candidates),
             total_ranked=len(ranked),
+            days_scanned=days_scanned,
+            target_reached=target_reached,
             site_url=self.settings.site_url,
         )
 
@@ -342,3 +435,76 @@ class OdisseoSignalAtlasPipeline:
         if not isinstance(value, str) or not value:
             return None
         return datetime.fromisoformat(value)
+
+    def _target_candidate_count(self, target_repos: int) -> int:
+        """Translate the export target into a candidate target with small buffer."""
+
+        buffered_target = math.ceil(
+            target_repos * self.settings.candidate_target_multiplier
+        )
+        return max(target_repos, buffered_target)
+
+    def _build_report_stats(
+        self,
+        *,
+        total_planned_queries: int,
+        total_queries: int,
+        total_skipped_queries: int,
+        total_tweets: int,
+        total_candidates: int,
+        days_scanned: int,
+        target_repos: int,
+    ) -> dict[str, int]:
+        """Build a stable stats payload for report snapshots."""
+
+        return {
+            "Target repositories": target_repos,
+            "Queries planned": total_planned_queries,
+            "Queries executed": total_queries,
+            "Queries skipped from history": total_skipped_queries,
+            "Tweets analyzed": total_tweets,
+            "Candidates discovered": total_candidates,
+            "Days scanned": days_scanned,
+        }
+
+    def _build_completion_notes(
+        self,
+        *,
+        target_reached: bool,
+        target_repos: int,
+        total_ranked: int,
+        days_scanned: int,
+    ) -> list[str]:
+        """Build completion notes for the final report snapshot."""
+
+        if target_reached:
+            return [f"Target reached with {total_ranked} ranked repositories."]
+        return [
+            (
+                f"Target not reached. The run exported {total_ranked} repositories after "
+                f"scanning {days_scanned} days."
+            ),
+            (
+                "Increase ODISSEO_X_MAX_BACKFILL_DAYS, widen query seeds, or add a second "
+                "source beyond X recent search to push toward 500."
+            ),
+        ]
+
+    def _write_report_snapshot(
+        self,
+        *,
+        repos: list[RepoRecord],
+        run_status: str,
+        stats: dict[str, int],
+        notes: list[str],
+    ) -> Path:
+        """Write the public Markdown report for a running or completed snapshot."""
+
+        return write_markdown(
+            self.settings.output_file,
+            repos,
+            self.settings.site_url,
+            run_status=run_status,
+            stats=stats,
+            notes=notes,
+        )

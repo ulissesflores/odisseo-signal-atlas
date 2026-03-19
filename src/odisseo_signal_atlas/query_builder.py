@@ -23,11 +23,17 @@ def build_queries(
     now: datetime | None = None,
     lookback_days: int = 3,
     window_hours: int = 12,
+    allow_live_window: bool = True,
 ) -> list[QuerySpec]:
     """Build deterministic query specs across languages, topics, and time windows."""
 
     queries: list[QuerySpec] = []
-    windows = _build_windows(now=now, lookback_days=lookback_days, window_hours=window_hours)
+    windows = _build_windows(
+        now=now,
+        lookback_days=lookback_days,
+        window_hours=window_hours,
+        allow_live_window=allow_live_window,
+    )
     for language in languages:
         seed_block = "(" + " OR ".join(f'"{seed}"' for seed in language.seed_terms) + ")"
         github_block = '(github.com OR "github.com/")'
@@ -78,6 +84,7 @@ def _build_windows(
     now: datetime | None,
     lookback_days: int,
     window_hours: int,
+    allow_live_window: bool,
 ) -> list[tuple[datetime, datetime, bool]]:
     """Build newest-first UTC windows for recent-search backfills."""
 
@@ -94,7 +101,7 @@ def _build_windows(
     for index in range(window_count):
         end_time = anchor - timedelta(hours=index * window_hours)
         start_time = end_time - timedelta(hours=window_hours)
-        windows.append((start_time, end_time, index == 0))
+        windows.append((start_time, end_time, allow_live_window and index == 0))
     return windows
 
 

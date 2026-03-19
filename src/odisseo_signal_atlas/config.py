@@ -135,11 +135,13 @@ class Settings:
     x_pages_per_query: int
     x_min_request_interval_seconds: float
     x_lookback_days: int
+    x_max_backfill_days: int
     x_window_hours: int
     x_refresh_live_window: bool
     x_rate_limit_default_wait_seconds: int
     x_rate_limit_max_wait_seconds: int
     target_repos: int
+    candidate_target_multiplier: float
     query_history_file: Path
     query_history_retention_days: int
     excluded_repos: set[str]
@@ -180,6 +182,12 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
             os.getenv("ODISSEO_X_MIN_REQUEST_INTERVAL_SECONDS", "0.25")
         ),
         x_lookback_days=int(os.getenv("ODISSEO_X_LOOKBACK_DAYS", "3")),
+        x_max_backfill_days=int(
+            os.getenv(
+                "ODISSEO_X_MAX_BACKFILL_DAYS",
+                os.getenv("ODISSEO_X_LOOKBACK_DAYS", "3"),
+            )
+        ),
         x_window_hours=int(os.getenv("ODISSEO_X_WINDOW_HOURS", "12")),
         x_refresh_live_window=_env_bool("ODISSEO_X_REFRESH_LIVE_WINDOW", default=True),
         x_rate_limit_default_wait_seconds=int(
@@ -189,6 +197,9 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
             os.getenv("ODISSEO_X_RATE_LIMIT_MAX_WAIT_SECONDS", "900")
         ),
         target_repos=int(os.getenv("ODISSEO_TARGET_REPOS", "500")),
+        candidate_target_multiplier=float(
+            os.getenv("ODISSEO_CANDIDATE_TARGET_MULTIPLIER", "1.15")
+        ),
         query_history_file=root / os.getenv(
             "ODISSEO_QUERY_HISTORY_FILE",
             "cache/query_history.json",

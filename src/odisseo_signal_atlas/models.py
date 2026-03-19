@@ -110,4 +110,6 @@ class PipelineReport:
     total_tweets: int
     total_candidates: int
     total_ranked: int
+    days_scanned: int
+    target_reached: bool
     site_url: str

@@ -24,8 +24,10 @@ def test_load_settings_honors_environment_layering(
     assert settings.output_file == Path(tmp_path) / "output/odisseo-signal-atlas-report.md"
     assert settings.query_history_file == Path(tmp_path) / "cache/query_history.json"
     assert settings.x_min_request_interval_seconds == 0.25
+    assert settings.x_max_backfill_days == 3
     assert settings.x_rate_limit_default_wait_seconds == 60
     assert settings.x_rate_limit_max_wait_seconds == 900
+    assert settings.candidate_target_multiplier == 1.15
 
 
 def test_load_settings_requires_x_bearer_token(

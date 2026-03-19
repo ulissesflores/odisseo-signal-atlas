@@ -115,11 +115,13 @@ def test_pipeline_runs_end_to_end_with_mocks(
         x_pages_per_query=1,
         x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
+        x_max_backfill_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
         x_rate_limit_default_wait_seconds=60,
         x_rate_limit_max_wait_seconds=900,
         target_repos=10,
+        candidate_target_multiplier=1.15,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
         excluded_repos={"anthropics/skills"},
@@ -142,6 +144,8 @@ def test_pipeline_runs_end_to_end_with_mocks(
     assert report.total_tweets == 2
     assert report.total_candidates == 2
     assert report.total_ranked == 1
+    assert report.days_scanned == 1
+    assert report.target_reached is False
     assert settings.output_file.exists()
 
 
@@ -184,11 +188,13 @@ def test_pipeline_skips_historical_query_windows_from_cache(
         x_pages_per_query=1,
         x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
+        x_max_backfill_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
         x_rate_limit_default_wait_seconds=60,
         x_rate_limit_max_wait_seconds=900,
         target_repos=10,
+        candidate_target_multiplier=1.15,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
         excluded_repos=set(),
@@ -251,11 +257,13 @@ def test_pipeline_retries_after_rate_limit_and_persists_resume_state(
         x_pages_per_query=1,
         x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
+        x_max_backfill_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
         x_rate_limit_default_wait_seconds=5,
         x_rate_limit_max_wait_seconds=30,
         target_repos=10,
+        candidate_target_multiplier=1.15,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
         excluded_repos=set(),
@@ -340,11 +348,13 @@ def test_pipeline_loads_candidates_from_cache_for_resume(
         x_pages_per_query=1,
         x_min_request_interval_seconds=0.0,
         x_lookback_days=1,
+        x_max_backfill_days=1,
         x_window_hours=12,
         x_refresh_live_window=True,
         x_rate_limit_default_wait_seconds=60,
         x_rate_limit_max_wait_seconds=900,
         target_repos=10,
+        candidate_target_multiplier=1.15,
         query_history_file=tmp_path / "cache/query_history.json",
         query_history_retention_days=30,
         excluded_repos=set(),
@@ -390,3 +400,98 @@ def test_pipeline_loads_candidates_from_cache_for_resume(
 
     assert report.total_candidates == 2
     assert {"acme/from-cache", "acme/odisseo-memory"}.issubset(slugs)
+
+
+def test_pipeline_backfills_older_windows_until_candidate_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    language = SearchLanguage("en", "English", ("Claude Code",), ("memory",))
+    settings = Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output/report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=10,
+        x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
+        x_lookback_days=1,
+        x_max_backfill_days=2,
+        x_window_hours=24,
+        x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
+        target_repos=2,
+        candidate_target_multiplier=1.0,
+        query_history_file=tmp_path / "cache/query_history.json",
+        query_history_retention_days=30,
+        excluded_repos=set(),
+        search_languages=[language],
+    )
+
+    calls: list[datetime] = []
+
+    def fake_build_queries(
+        _languages: list[SearchLanguage],
+        *,
+        now: datetime | None = None,
+        lookback_days: int = 1,
+        window_hours: int = 24,
+        allow_live_window: bool = True,
+    ) -> list[QuerySpec]:
+        assert now is not None
+        calls.append(now)
+        query_id = f"{now:%Y%m%d}"
+        return [
+            QuerySpec(
+                language=language,
+                topic_label="memory",
+                query=f"memory query {query_id}",
+                window_label=f"{query_id}-window",
+                start_time=now,
+                end_time=now,
+                is_live_window=allow_live_window,
+            )
+        ]
+
+    class BackfillXClient:
+        def search(
+            self,
+            query: str,
+            max_results_per_page: int = 100,
+            max_pages: int = 5,
+            start_time: datetime | None = None,
+            end_time: datetime | None = None,
+        ) -> list[TweetHit]:
+            slug = query.split()[-1]
+            return [
+                TweetHit(
+                    tweet_id=slug,
+                    text=f"https://github.com/acme/{slug}",
+                    lang="en",
+                    created_at=datetime.now(UTC),
+                    public_metrics={},
+                    expanded_urls=[f"https://github.com/acme/{slug}"],
+                )
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("odisseo_signal_atlas.pipeline.build_queries", fake_build_queries)
+    pipeline = OdisseoSignalAtlasPipeline(settings)
+    pipeline.x_client = cast(XClient, BackfillXClient())
+    pipeline.github_client = cast(GitHubClient, DummyGitHubClient())
+
+    report = pipeline.run(target_repos=2)
+
+    assert len(calls) == 2
+    assert report.days_scanned == 2
+    assert report.total_candidates == 2
+    assert report.target_reached is True
