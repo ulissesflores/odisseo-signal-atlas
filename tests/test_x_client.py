@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from odisseo_signal_atlas.exceptions import RemoteAPIError
+from odisseo_signal_atlas.x_client import XClient
+
+
+class DummyResponse:
+    def __init__(self, status_code: int, payload: dict, text: str = "") -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text or str(payload)
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            request = httpx.Request("GET", "https://api.x.com/2/tweets/search/recent")
+            response = httpx.Response(self.status_code, request=request)
+            raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+    def json(self) -> dict:
+        return self._payload
+
+
+def test_request_raises_on_auth_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = XClient("token", "https://api.x.com/2/tweets/search/recent")
+    monkeypatch.setattr(
+        client.http,
+        "get",
+        lambda url, params: DummyResponse(401, {"error": "denied"}, text="denied"),
+    )
+
+    with pytest.raises(RemoteAPIError, match="authentication failed"):
+        client._request({"query": "test"})
+
+    client.close()
+
+
+def test_search_parses_tweets_and_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    payloads = [
+        {
+            "data": [
+                {
+                    "id": "1",
+                    "text": "look https://github.com/acme/project",
+                    "lang": "en",
+                    "created_at": "2026-03-19T00:00:00Z",
+                    "author_id": "u1",
+                    "public_metrics": {"like_count": 5},
+                    "entities": {
+                        "urls": [
+                            {
+                                "expanded_url": "https://github.com/acme/project",
+                                "url": "https://t.co/1",
+                            }
+                        ]
+                    },
+                }
+            ],
+            "includes": {"users": [{"id": "u1", "username": "alice"}]},
+            "meta": {"next_token": "next"},
+        },
+        {
+            "data": [
+                {
+                    "id": "2",
+                    "text": "look https://github.com/acme/other",
+                    "lang": "pt",
+                    "created_at": "2026-03-19T01:00:00Z",
+                    "author_id": "u2",
+                    "public_metrics": {"like_count": 2},
+                    "entities": {"urls": []},
+                }
+            ],
+            "includes": {"users": [{"id": "u2", "username": "bruno"}]},
+            "meta": {},
+        },
+    ]
+
+    client = XClient("token", "https://api.x.com/2/tweets/search/recent")
+    monkeypatch.setattr(client, "_request", lambda params: payloads.pop(0))
+
+    tweets = client.search("query", max_results_per_page=10, max_pages=2)
+
+    assert len(tweets) == 2
+    assert tweets[0].author_username == "alice"
+    assert tweets[0].expanded_urls == ["https://github.com/acme/project"]
+    assert tweets[0].matched_query == "query"
+    assert tweets[1].author_username == "bruno"
+    assert tweets[1].created_at is not None
+    client.close()

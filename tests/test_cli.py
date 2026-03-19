@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import sys
+from argparse import Namespace
+from pathlib import Path
+from typing import ClassVar
+
+import pytest
+
+from odisseo_signal_atlas import cli
+from odisseo_signal_atlas.config import Settings
+from odisseo_signal_atlas.models import PipelineReport, SearchLanguage
+
+
+def _settings(tmp_path: Path) -> Settings:
+    return Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output" / "report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=100,
+        x_pages_per_query=5,
+        target_repos=500,
+        excluded_repos=set(),
+        search_languages=[
+            SearchLanguage("en", "English", ("Claude Code",), ("memory",)),
+            SearchLanguage("pt", "Portuguese", ("Claude Code",), ("memoria",)),
+        ],
+    )
+
+
+class DummyPipeline:
+    instances: ClassVar[list[DummyPipeline]] = []
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.closed = False
+        self.run_target: int | None = None
+        self.__class__.instances.append(self)
+
+    def run(self, target_repos: int | None = None) -> PipelineReport:
+        self.run_target = target_repos
+        return PipelineReport(
+            output_path=str(self.settings.output_file),
+            total_queries=3,
+            total_tweets=5,
+            total_candidates=4,
+            total_ranked=2,
+            site_url=self.settings.site_url,
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_main_routes_to_default_run_and_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(cli, "configure_logging", lambda level: events.append(("log", level)))
+    monkeypatch.setattr(cli, "_run_discovery", lambda args: events.append(("run", args.command)))
+    monkeypatch.setattr(cli, "_run_smoke", lambda args: events.append(("smoke", args.command)))
+
+    monkeypatch.setattr(sys, "argv", ["odisseo-atlas"])
+    cli.main()
+    monkeypatch.setattr(sys, "argv", ["odisseo-atlas", "smoke"])
+    cli.main()
+
+    assert ("run", "run") in events
+    assert ("smoke", "smoke") in events
+
+
+def test_run_discovery_filters_languages_and_prints_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = _settings(tmp_path)
+    DummyPipeline.instances.clear()
+    monkeypatch.setattr(cli, "load_settings", lambda project_root: settings)
+    monkeypatch.setattr(cli, "OdisseoSignalAtlasPipeline", DummyPipeline)
+
+    args = Namespace(target=7, languages="en", project_root=tmp_path)
+    cli._run_discovery(args)
+
+    captured = capsys.readouterr()
+    pipeline = DummyPipeline.instances[-1]
+    assert pipeline.run_target == 7
+    assert pipeline.closed is True
+    assert [language.code for language in pipeline.settings.search_languages] == ["en"]
+    assert "Repositories exported: 2" in captured.out
+
+
+def test_run_smoke_constrains_runtime_and_output_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = _settings(tmp_path)
+    DummyPipeline.instances.clear()
+    monkeypatch.setattr(cli, "load_settings", lambda project_root: settings)
+    monkeypatch.setattr(cli, "OdisseoSignalAtlasPipeline", DummyPipeline)
+
+    args = Namespace(target=None, languages="en,pt", project_root=tmp_path)
+    cli._run_smoke(args)
+
+    captured = capsys.readouterr()
+    pipeline = DummyPipeline.instances[-1]
+    assert pipeline.run_target == 10
+    assert pipeline.closed is True
+    assert pipeline.settings.x_max_results_per_page == 10
+    assert pipeline.settings.x_pages_per_query == 1
+    assert pipeline.settings.output_file.name == "odisseo-signal-atlas.smoke.md"
+    assert "Smoke output file:" in captured.out

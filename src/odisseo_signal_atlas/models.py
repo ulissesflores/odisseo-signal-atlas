@@ -1,0 +1,90 @@
+"""Core dataclasses used by the discovery pipeline."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SearchLanguage:
+    """Language-specific seed terms used to build X queries."""
+
+    code: str
+    label: str
+    seed_terms: tuple[str, ...]
+    topic_terms: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QuerySpec:
+    """Concrete query generated for a language/topic combination."""
+
+    language: SearchLanguage
+    topic_label: str
+    query: str
+
+
+@dataclass(slots=True)
+class TweetHit:
+    """Normalized X API tweet record used by downstream ranking."""
+
+    tweet_id: str
+    text: str
+    lang: str | None
+    created_at: datetime | None
+    public_metrics: dict[str, int]
+    author_username: str | None = None
+    expanded_urls: list[str] = field(default_factory=list)
+    matched_query: str | None = None
+
+
+@dataclass(slots=True)
+class RepoCandidate:
+    """Repository candidate extracted from one or more tweets."""
+
+    repo_url: str
+    repo_slug: str
+    source_tweets: list[TweetHit] = field(default_factory=list)
+    source_languages: set[str] = field(default_factory=set)
+    matched_topics: set[str] = field(default_factory=set)
+
+    def absorb(self, tweet: TweetHit, topic_label: str, language_code: str) -> None:
+        """Merge a new discovery event into the candidate."""
+
+        self.source_tweets.append(tweet)
+        self.source_languages.add(language_code)
+        self.matched_topics.add(topic_label)
+
+
+@dataclass(slots=True)
+class RepoRecord:
+    """Enriched GitHub repository record ready for ranking and export."""
+
+    repo_url: str
+    repo_slug: str
+    stars: int
+    primary_language: str | None
+    description: str
+    topics: list[str]
+    html_url: str
+    updated_at: datetime | None
+    pushed_at: datetime | None
+    source_languages: list[str]
+    matched_topics: list[str]
+    source_tweets: list[TweetHit]
+    score: float = 0.0
+    rationale: str = ""
+
+
+@dataclass(slots=True)
+class PipelineReport:
+    """Summary emitted after a pipeline execution."""
+
+    output_path: str
+    total_queries: int
+    total_tweets: int
+    total_candidates: int
+    total_ranked: int
+    site_url: str
+
