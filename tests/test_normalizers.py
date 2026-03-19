@@ -38,3 +38,16 @@ def test_compact_text_and_to_iso_cover_public_output_helpers() -> None:
     assert compact_text("x" * 20, max_length=10) == "xxxxxxx..."
     assert to_iso(datetime(2026, 3, 19, tzinfo=UTC)) == "2026-03-19T00:00:00+00:00"
     assert to_iso(None) is None
+
+
+def test_canonicalize_repo_url_rejects_github_topic_pages() -> None:
+    assert canonicalize_repo_url("https://github.com/topics/ai-coding-tools") is None
+
+
+def test_extract_repo_urls_prefers_expanded_urls_over_truncated_text() -> None:
+    results = extract_repo_urls(
+        "truncated https://github.com/thedotmack/cla",
+        ["https://github.com/thedotmack/claude-mem"],
+    )
+
+    assert results == [("https://github.com/thedotmack/claude-mem", "thedotmack/claude-mem")]

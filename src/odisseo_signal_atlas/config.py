@@ -125,9 +125,9 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
 
     root = Path(project_root or Path.cwd()).resolve()
     environment = os.getenv("ODISSEO_ENV", "local")
-    _load_env_file(root / ".env")
-    _load_env_file(root / f".env.{environment}")
     _load_env_file(root / ".env.local")
+    _load_env_file(root / f".env.{environment}")
+    _load_env_file(root / ".env")
 
     x_bearer_token = os.getenv("ODISSEO_X_BEARER_TOKEN", "").strip()
     if not x_bearer_token:
@@ -160,4 +160,4 @@ def _load_env_file(path: Path) -> None:
     """Load an environment file if it exists."""
 
     if path.exists():
-        load_dotenv(path, override=True)
+        load_dotenv(path, override=False)

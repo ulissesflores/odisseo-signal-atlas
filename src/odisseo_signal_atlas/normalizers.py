@@ -7,6 +7,23 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 GITHUB_REPO_RE = re.compile(r"https?://github\.com/([\w.-]+)/([\w.-]+)", re.IGNORECASE)
+NON_REPO_ROOTS = {
+    "collections",
+    "events",
+    "features",
+    "issues",
+    "login",
+    "marketplace",
+    "notifications",
+    "organizations",
+    "orgs",
+    "pulls",
+    "search",
+    "settings",
+    "sponsors",
+    "topics",
+    "users",
+}
 
 
 def canonicalize_repo_url(url: str) -> tuple[str, str] | None:
@@ -19,12 +36,16 @@ def canonicalize_repo_url(url: str) -> tuple[str, str] | None:
     match = GITHUB_REPO_RE.search(cleaned)
     if match:
         owner, repo = match.group(1), match.group(2)
+        if owner.lower() in NON_REPO_ROOTS:
+            return None
     else:
         parsed = urlparse(cleaned)
         if parsed.netloc.lower() != "github.com":
             return None
         path_parts = [part for part in parsed.path.split("/") if part]
         if len(path_parts) < 2:
+            return None
+        if path_parts[0].lower() in NON_REPO_ROOTS:
             return None
         owner, repo = path_parts[0], path_parts[1]
 
@@ -37,8 +58,13 @@ def extract_repo_urls(text: str, expanded_urls: list[str]) -> list[tuple[str, st
     """Extract and deduplicate canonical GitHub repository URLs."""
 
     found: list[tuple[str, str]] = []
-    raw_candidates = [*expanded_urls, *re.findall(r"https?://\S+", text)]
-    for candidate in raw_candidates:
+    for candidate in expanded_urls:
+        normalized = canonicalize_repo_url(candidate)
+        if normalized and normalized not in found:
+            found.append(normalized)
+    if found:
+        return found
+    for candidate in re.findall(r"https?://\S+", text):
         normalized = canonicalize_repo_url(candidate)
         if normalized and normalized not in found:
             found.append(normalized)

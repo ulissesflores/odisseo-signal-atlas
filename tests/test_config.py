@@ -33,3 +33,20 @@ def test_load_settings_requires_x_bearer_token(
 
     with pytest.raises(ConfigurationError, match="ODISSEO_X_BEARER_TOKEN"):
         load_settings(tmp_path)
+
+
+def test_process_environment_overrides_env_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text("ODISSEO_X_BEARER_TOKEN=file-token\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text(
+        "ODISSEO_X_BEARER_TOKEN=local-file-token\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ODISSEO_ENV", "local")
+    monkeypatch.setenv("ODISSEO_X_BEARER_TOKEN", "process-token")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.x_bearer_token == "process-token"
