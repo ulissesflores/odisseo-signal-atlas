@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a defect in discovery, ranking, export, or repository tooling.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug in Odisseo Signal Atlas.
+  - type: input
+    id: area
+    attributes:
+      label: Affected area
+      placeholder: x-client, github-client, ranking, export, docs, ci
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the command you ran and the observed result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Remove secrets before submitting.

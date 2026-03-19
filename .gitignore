@@ -14,8 +14,9 @@ __pycache__/
 *.pyc
 *.pyd
 *.pyo
+build/
 cache/*
+dist/
 output/*
 !cache/.gitkeep
 !output/.gitkeep
-

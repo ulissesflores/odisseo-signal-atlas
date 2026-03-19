@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/ulissesflores/odisseo-signal-atlas/blob/main/SECURITY.md
+    about: Report vulnerabilities using the repository security policy.
+  - name: Ulisses Flores
+    url: https://ulissesflores.com
+    about: Project homepage and public context.

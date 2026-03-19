@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a product, engineering, or discovery improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for product and engineering proposals.
+  - type: input
+    id: problem
+    attributes:
+      label: Problem statement
+      placeholder: What is missing or weak today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this matters
+      description: Explain the impact on search quality, reliability, public posture, or developer experience.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or tradeoffs

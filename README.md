@@ -1,5 +1,9 @@
 # Odisseo Signal Atlas
 
+[![CI](https://github.com/ulissesflores/odisseo-signal-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/ulissesflores/odisseo-signal-atlas/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 Official engineering repository for the `Odisseo Signal Atlas` discovery engine by [Ulisses Flores](https://ulissesflores.com).
 
 Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` API, extracts GitHub repositories from real social signals, enriches them with GitHub metadata, scores them against frontier engineering criteria, and exports a public-quality Markdown report.
@@ -12,6 +16,12 @@ Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` 
 - Distribution goal: SEO, GEO, and LLM-friendly public repository
 - Operating model: local-first, environment-driven, reproducible, testable
 - Delivery surface: CLI-first, no notebook dependency
+
+## What This Repository Is
+
+This repository is intentionally structured like a public software product, not a throwaway script. That means source code, tests, docs, ADRs, CI, security policy, templates, and release metadata all live here on purpose.
+
+Tracked public files stay relatively small. Local-only artifacts such as `.venv`, cache files, `.env.local`, smoke outputs, and editor cruft are ignored and are not part of the public repository surface.
 
 ## Scope
 
@@ -55,6 +65,16 @@ Populate secrets locally:
 - `src/odisseo_signal_atlas/`: core product code
 - `tests/`: automated regression suite
 - `docs/adr/`: architectural decisions for public maintenance
+
+## Repository layout
+
+```text
+src/odisseo_signal_atlas/   application package
+tests/                      regression and integration-style tests
+scripts/                    local launchers
+docs/adr/                   architecture decisions
+.github/                    CI, templates, repository governance
+```
 
 ## Local execution model
 
