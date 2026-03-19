@@ -163,6 +163,12 @@ Discovered candidates are also persisted incrementally in `cache/candidates.json
 
 If a run does not find enough repositories within the first recent-search slice, the pipeline keeps moving backward in time until it reaches the configured backfill limit. Every run writes a Markdown file, including progress or failure snapshots when final enrichment has not completed yet.
 
+Backfill semantics are strict:
+
+- every run starts from the current UTC anchor and moves backward
+- if a time window is already present in `cache/query_history.json`, that window is skipped
+- skipped windows still advance the cursor, so the pipeline keeps walking backward instead of looping on already searched days
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)

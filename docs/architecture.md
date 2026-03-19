@@ -16,6 +16,7 @@
 2. Build multilingual X queries from seed terms, topic presets, and recent-search windows.
 3. Continue scanning older recent-search windows until the target or the configured backfill ceiling is reached.
 4. Skip historical query slices already recorded in the local query-history cache.
+   Skipped windows still advance the backfill cursor so the run keeps moving backward.
 5. Search the X API, pace requests, and wait for reset windows when X returns `429`.
 6. Normalize GitHub links into canonical repository slugs.
 7. Enrich each slug with GitHub metadata.

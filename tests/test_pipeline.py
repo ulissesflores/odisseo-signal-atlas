@@ -495,3 +495,136 @@ def test_pipeline_backfills_older_windows_until_candidate_target(
     assert report.days_scanned == 2
     assert report.total_candidates == 2
     assert report.target_reached is True
+
+
+def test_pipeline_skips_known_recent_windows_and_continues_backwards(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    language = SearchLanguage("en", "English", ("Claude Code",), ("memory",))
+    recent_now = datetime(2026, 3, 19, 12, 0, tzinfo=UTC)
+    older_now = datetime(2026, 3, 18, 12, 0, tzinfo=UTC)
+
+    settings = Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output/report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=10,
+        x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
+        x_lookback_days=1,
+        x_max_backfill_days=2,
+        x_window_hours=24,
+        x_refresh_live_window=False,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
+        target_repos=2,
+        candidate_target_multiplier=1.0,
+        query_history_file=tmp_path / "cache/query_history.json",
+        query_history_retention_days=30,
+        excluded_repos=set(),
+        search_languages=[language],
+    )
+
+    calls: list[str] = []
+
+    def fake_build_queries(
+        _languages: list[SearchLanguage],
+        *,
+        now: datetime | None = None,
+        lookback_days: int = 1,
+        window_hours: int = 24,
+        allow_live_window: bool = True,
+    ) -> list[QuerySpec]:
+        assert now is not None
+        return [
+            QuerySpec(
+                language=language,
+                topic_label="memory",
+                query=f"memory query {now:%Y%m%d}",
+                window_label=f"{now:%Y%m%d}-window",
+                start_time=now,
+                end_time=now,
+                is_live_window=allow_live_window,
+            )
+        ]
+
+    recent_query = QuerySpec(
+        language=language,
+        topic_label="memory",
+        query=f"memory query {recent_now:%Y%m%d}",
+        window_label=f"{recent_now:%Y%m%d}-window",
+        start_time=recent_now,
+        end_time=recent_now,
+        is_live_window=False,
+    )
+    settings.query_history_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.query_history_file.write_text(
+        json.dumps(
+            {
+                recent_query.signature: {
+                    "executed_at": "2026-03-19T00:00:00+00:00",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class SkipThenBackfillXClient:
+        def search(
+            self,
+            query: str,
+            max_results_per_page: int = 100,
+            max_pages: int = 5,
+            start_time: datetime | None = None,
+            end_time: datetime | None = None,
+        ) -> list[TweetHit]:
+            calls.append(query)
+            return [
+                TweetHit(
+                    tweet_id="older-hit",
+                    text="https://github.com/acme/older-window-repo",
+                    lang="en",
+                    created_at=datetime.now(UTC),
+                    public_metrics={},
+                    expanded_urls=["https://github.com/acme/older-window-repo"],
+                )
+            ]
+
+        def close(self) -> None:
+            return None
+
+    baseline_times = [recent_now, older_now]
+
+    monkeypatch.setattr(
+        "odisseo_signal_atlas.pipeline.datetime",
+        type(
+            "FakeDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: baseline_times[0]
+                ),
+                "fromisoformat": staticmethod(datetime.fromisoformat),
+            },
+        ),
+    )
+    monkeypatch.setattr("odisseo_signal_atlas.pipeline.build_queries", fake_build_queries)
+
+    pipeline = OdisseoSignalAtlasPipeline(settings)
+    pipeline.x_client = cast(XClient, SkipThenBackfillXClient())
+    pipeline.github_client = cast(GitHubClient, DummyGitHubClient())
+
+    report = pipeline.run(target_repos=2)
+
+    assert report.total_skipped_queries == 1
+    assert report.total_queries == 1
+    assert report.days_scanned == 2
+    assert calls == [f"memory query {older_now:%Y%m%d}"]

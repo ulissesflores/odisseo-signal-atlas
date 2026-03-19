@@ -16,10 +16,13 @@ The pipeline uses explicit recent-search windows plus a persistent query-history
 - completed query windows are recorded in `cache/query_history.json`
 - historical windows already seen are skipped on later runs
 - the newest live window can still be refreshed to catch recent activity
+- reruns always begin from the current window and keep walking backward
+- skipped windows still advance the backfill cursor so older unseen days are eventually reached
 
 ## Consequences
 
 - X API usage becomes more efficient and predictable
 - local reruns avoid redundant backfills
+- previously searched recent days do not trap the pipeline near the present
 - multilingual runs can scale without starting from zero each time
 - the cache becomes part of operational observability and should not be committed
