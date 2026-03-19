@@ -127,6 +127,7 @@ class Settings:
     cache_dir: Path
     output_dir: Path
     output_file: Path
+    repo_insights_dir: Path
     site_url: str
     x_bearer_token: str
     github_token: str | None
@@ -143,12 +144,17 @@ class Settings:
     target_repos: int
     candidate_target_multiplier: float
     query_history_file: Path
+    inspection_state_file: Path
     query_history_retention_days: int
     excluded_repos: set[str]
     search_languages: list[SearchLanguage]
 
 
-def load_settings(project_root: str | Path | None = None) -> Settings:
+def load_settings(
+    project_root: str | Path | None = None,
+    *,
+    require_x_bearer: bool = True,
+) -> Settings:
     """Load layered configuration for the current environment."""
 
     root = Path(project_root or Path.cwd()).resolve()
@@ -158,7 +164,7 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
     _load_env_file(root / ".env")
 
     x_bearer_token = os.getenv("ODISSEO_X_BEARER_TOKEN", "").strip()
-    if not x_bearer_token:
+    if require_x_bearer and not x_bearer_token:
         raise ConfigurationError("ODISSEO_X_BEARER_TOKEN is required for discovery runs.")
 
     output_file = root / os.getenv("ODISSEO_OUTPUT_FILE", DEFAULT_OUTPUT_FILE)
@@ -169,6 +175,10 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
         cache_dir=root / "cache",
         output_dir=root / "output",
         output_file=output_file,
+        repo_insights_dir=root / os.getenv(
+            "ODISSEO_REPO_INSIGHTS_DIR",
+            "output/repo-insights",
+        ),
         site_url=os.getenv("ODISSEO_SITE_URL", DEFAULT_SITE_URL),
         x_bearer_token=x_bearer_token,
         github_token=os.getenv("ODISSEO_GITHUB_TOKEN") or None,
@@ -203,6 +213,10 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
         query_history_file=root / os.getenv(
             "ODISSEO_QUERY_HISTORY_FILE",
             "cache/query_history.json",
+        ),
+        inspection_state_file=root / os.getenv(
+            "ODISSEO_INSPECTION_STATE_FILE",
+            "cache/inspection_state.json",
         ),
         query_history_retention_days=int(
             os.getenv("ODISSEO_QUERY_HISTORY_RETENTION_DAYS", "30")

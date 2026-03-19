@@ -31,7 +31,10 @@ def test_fetch_repo_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         client.http,
         "get",
-        lambda url: DummyResponse(200, {"html_url": "https://github.com/acme/project"}),
+        lambda url, **kwargs: DummyResponse(
+            200,
+            {"html_url": "https://github.com/acme/project"},
+        ),
     )
 
     payload = client.fetch_repo("acme", "project")
@@ -52,7 +55,11 @@ def test_fetch_repo_raises_on_missing_repository(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         client.http,
         "get",
-        lambda url: DummyResponse(404, {"message": "Not Found"}, text="missing"),
+        lambda url, **kwargs: DummyResponse(
+            404,
+            {"message": "Not Found"},
+            text="missing",
+        ),
     )
 
     with pytest.raises(RemoteAPIError, match="GitHub repository not found"):
@@ -97,4 +104,37 @@ def test_build_record_maps_enriched_fields(monkeypatch: pytest.MonkeyPatch) -> N
     assert record.primary_language == "Python"
     assert record.source_languages == ["en", "pt"]
     assert record.topics == ["mcp", "memory"]
+    client.close()
+
+
+def test_fetch_readme_returns_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GitHubClient(token=None)
+    monkeypatch.setattr(
+        client.http,
+        "get",
+        lambda url, **kwargs: DummyResponse(200, {}, text="# Atlas\nMemory and MCP"),
+    )
+
+    readme = client.fetch_readme("acme", "atlas")
+
+    assert readme == "# Atlas\nMemory and MCP"
+    client.close()
+
+
+def test_fetch_languages_filters_non_integer_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = GitHubClient(token=None)
+    monkeypatch.setattr(
+        client.http,
+        "get",
+        lambda url, **kwargs: DummyResponse(
+            200,
+            {"Python": 1200, "TypeScript": 400, "bad": "skip"},
+        ),
+    )
+
+    languages = client.fetch_languages("acme", "atlas")
+
+    assert languages == {"Python": 1200, "TypeScript": 400}
     client.close()

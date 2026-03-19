@@ -2,6 +2,19 @@
 
 All notable changes to `Odisseo Signal Atlas` will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Sequential GitHub repository inspection mode for reviewing one cached candidate at a time without calling the X API
+- Dedicated inspection state tracking and per-repository Markdown reports in `output/repo-insights/`
+- CLI commands for `inspect` and `inspect-next`
+
+### Changed
+
+- Configuration loading now supports inspection-only commands without requiring an X bearer token
+- Environment examples now document inspection state and repo-insight output paths
+
 ## [0.1.0] - 2026-03-19
 
 ### Added

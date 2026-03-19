@@ -47,6 +47,46 @@ class GitHubClient:
         response.raise_for_status()
         return response.json()
 
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    def fetch_readme(self, owner: str, repo: str) -> str | None:
+        """Fetch the raw repository README when available."""
+
+        response = self.http.get(
+            f"https://api.github.com/repos/{owner}/{repo}/readme",
+            headers={"Accept": "application/vnd.github.raw+json"},
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.text
+
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    def fetch_languages(self, owner: str, repo: str) -> dict[str, int]:
+        """Fetch the language byte distribution for a repository."""
+
+        response = self.http.get(f"https://api.github.com/repos/{owner}/{repo}/languages")
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            name: count
+            for name, count in payload.items()
+            if isinstance(name, str) and isinstance(count, int)
+        }
+
     def build_record(
         self,
         repo_slug: str,

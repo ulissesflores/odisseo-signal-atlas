@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import load_settings
 from .logging_utils import configure_logging
 from .pipeline import OdisseoSignalAtlasPipeline
+from .repo_inspector import RepoInspector
 
 
 def main() -> None:
@@ -18,6 +19,12 @@ def main() -> None:
     configure_logging(args.log_level)
     if args.command == "smoke":
         _run_smoke(args)
+        return
+    if args.command == "inspect":
+        _run_inspect(args)
+        return
+    if args.command == "inspect-next":
+        _run_inspect_next(args)
         return
     _run_discovery(args)
 
@@ -32,6 +39,33 @@ def _build_parser() -> argparse.ArgumentParser:
 
     smoke_parser = subparsers.add_parser("smoke", help="Run a constrained smoke execution.")
     _add_common_arguments(smoke_parser)
+
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Inspect one specific GitHub repository without querying X.",
+    )
+    inspect_parser.add_argument(
+        "--repo",
+        required=True,
+        help="GitHub URL or owner/repo slug to inspect.",
+    )
+    inspect_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[2],
+        help="Project root directory.",
+    )
+
+    inspect_next_parser = subparsers.add_parser(
+        "inspect-next",
+        help="Inspect the next unseen repository from the ranked cache.",
+    )
+    inspect_next_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[2],
+        help="Project root directory.",
+    )
 
     parser.set_defaults(command="run")
     return parser
@@ -95,6 +129,34 @@ def _run_smoke(args: argparse.Namespace) -> None:
     print(f"Queries skipped from history: {report.total_skipped_queries}")
     print(f"Tweets analyzed: {report.total_tweets}")
     print(f"Repositories exported: {report.total_ranked}")
+
+
+def _run_inspect(args: argparse.Namespace) -> None:
+    settings = load_settings(args.project_root, require_x_bearer=False)
+    inspector = RepoInspector(settings)
+    try:
+        report = inspector.inspect_repo(args.repo)
+    finally:
+        inspector.close()
+
+    print(f"Inspection file: {report.output_path}")
+    print(f"Repository: {report.repo_slug}")
+    print(f"Source cache: {report.source_cache}")
+    print(f"Remaining ranked candidates: {report.remaining_candidates}")
+
+
+def _run_inspect_next(args: argparse.Namespace) -> None:
+    settings = load_settings(args.project_root, require_x_bearer=False)
+    inspector = RepoInspector(settings)
+    try:
+        report = inspector.inspect_next()
+    finally:
+        inspector.close()
+
+    print(f"Inspection file: {report.output_path}")
+    print(f"Repository: {report.repo_slug}")
+    print(f"Source cache: {report.source_cache}")
+    print(f"Remaining ranked candidates: {report.remaining_candidates}")
 
 
 def _apply_language_filter(pipeline: OdisseoSignalAtlasPipeline, languages: str) -> None:

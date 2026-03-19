@@ -113,3 +113,13 @@ class PipelineReport:
     days_scanned: int
     target_reached: bool
     site_url: str
+
+
+@dataclass(slots=True)
+class RepoInspectionReport:
+    """Summary emitted after inspecting one repository."""
+
+    repo_slug: str
+    output_path: str
+    source_cache: str
+    remaining_candidates: int

@@ -22,7 +22,9 @@ def test_load_settings_honors_environment_layering(
     assert settings.x_bearer_token == "local-token"
     assert settings.target_repos == 42
     assert settings.output_file == Path(tmp_path) / "output/odisseo-signal-atlas-report.md"
+    assert settings.repo_insights_dir == Path(tmp_path) / "output/repo-insights"
     assert settings.query_history_file == Path(tmp_path) / "cache/query_history.json"
+    assert settings.inspection_state_file == Path(tmp_path) / "cache/inspection_state.json"
     assert settings.x_min_request_interval_seconds == 0.25
     assert settings.x_max_backfill_days == 3
     assert settings.x_rate_limit_default_wait_seconds == 60
@@ -56,6 +58,18 @@ def test_process_environment_overrides_env_files(
     settings = load_settings(tmp_path)
 
     assert settings.x_bearer_token == "process-token"
+
+
+def test_load_settings_allows_inspection_mode_without_x_bearer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ODISSEO_ENV", "local")
+    monkeypatch.delenv("ODISSEO_X_BEARER_TOKEN", raising=False)
+
+    settings = load_settings(tmp_path, require_x_bearer=False)
+
+    assert settings.x_bearer_token == ""
 
 
 def test_language_matrix_includes_hebrew_and_x_native_dev_communities(

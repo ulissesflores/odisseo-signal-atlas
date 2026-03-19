@@ -10,6 +10,8 @@ Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` 
 
 It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run. It also persists resumable candidate state, writes a Markdown report for every run, and respects X rate-limit windows instead of discarding a long execution when the API asks for a cooldown.
 
+When the X API is rate-limited, the repository also supports a sequential human-review mode that inspects one GitHub repository at a time from the ranked cache, without issuing new X requests.
+
 ## Public positioning
 
 - Brand: `Odisseo`
@@ -118,6 +120,15 @@ ODISSEO_GITHUB_TOKEN="$(gh auth token)" \
   --languages en,pt,es,it,ru,ja,zh,ko,fr,de,ar,he,tr,id
 ```
 
+Sequential inspection mode after discovery:
+
+```bash
+.venv/bin/python scripts/run_hunt.py inspect-next
+.venv/bin/python scripts/run_hunt.py inspect --repo https://github.com/owner/repo
+```
+
+Those commands use the ranked cache plus GitHub metadata only. They do not call the X API, which makes them useful while waiting for the next X rate-limit reset window.
+
 ## Configuration
 
 The project reads environment in this order:
@@ -155,11 +166,15 @@ Recent-search control is configured with:
 - `ODISSEO_X_RATE_LIMIT_MAX_WAIT_SECONDS`
 - `ODISSEO_CANDIDATE_TARGET_MULTIPLIER`
 - `ODISSEO_QUERY_HISTORY_FILE`
+- `ODISSEO_INSPECTION_STATE_FILE`
+- `ODISSEO_REPO_INSIGHTS_DIR`
 - `ODISSEO_QUERY_HISTORY_RETENTION_DAYS`
 
 The pipeline stores executed query windows in `cache/query_history.json` so older slices are skipped on subsequent runs while the newest live window can still be refreshed.
 
 Discovered candidates are also persisted incrementally in `cache/candidates.json`. That allows an interrupted or rate-limited run to resume without losing already discovered repository signals.
+
+Sequential repository reviews are persisted in `cache/inspection_state.json`, while the per-repository Markdown analyses are written to `output/repo-insights/`.
 
 If a run does not find enough repositories within the first recent-search slice, the pipeline keeps moving backward in time until it reaches the configured backfill limit. Every run writes a Markdown file, including progress or failure snapshots when final enrichment has not completed yet.
 
@@ -176,6 +191,8 @@ Backfill semantics are strict:
 - [ADR 0002](docs/adr/0002-environment-and-secrets.md)
 - [ADR 0003](docs/adr/0003-public-branding-and-canonical-links.md)
 - [ADR 0004](docs/adr/0004-cli-first-local-execution.md)
+- [ADR 0005](docs/adr/0005-time-sliced-query-history.md)
+- [ADR 0006](docs/adr/0006-sequential-repo-inspection.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
