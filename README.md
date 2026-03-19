@@ -8,6 +8,8 @@ Official engineering repository for the `Odisseo Signal Atlas` discovery engine 
 
 Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` API, extracts GitHub repositories from real social signals, enriches them with GitHub metadata, scores them against frontier engineering criteria, and exports a public-quality Markdown report.
 
+It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run.
+
 ## Public positioning
 
 - Brand: `Odisseo`
@@ -25,10 +27,11 @@ Tracked public files stay relatively small. Local-only artifacts such as `.venv`
 
 ## Scope
 
-- Multilingual query generation for `en`, `pt`, `es`, `it`, `ru`, `ja`, `zh`, `ko`, `fr`, `de`, and `ar`
+- Multilingual query generation for `en`, `pt`, `es`, `it`, `ru`, `ja`, `zh`, `ko`, `fr`, `de`, `ar`, `he`, `tr`, and `id`
 - Real X API discovery
 - GitHub repository normalization and enrichment
 - Heuristic ranking for hidden gems, experimental repos, MCP servers, memory systems, multi-agent stacks, and adjacent frontier tooling
+- Time-sliced recent-search execution with persistent query history
 - Markdown export with canonical site link back to [Ulisses Flores](https://ulissesflores.com)
 
 ## Engineering standards
@@ -54,6 +57,10 @@ Populate secrets locally:
 
 - `ODISSEO_X_BEARER_TOKEN`
 - `ODISSEO_GITHUB_TOKEN` for sustained enrichment runs
+
+## Language strategy
+
+The default language matrix mixes globally relevant developer languages with communities that are especially active on X for tooling, OSS, and AI engineering discourse. That is why the defaults include Japanese, Brazilian Portuguese, Hebrew, Turkish, and Indonesian in addition to the usual English-centric set.
 
 ## Runtime surfaces
 
@@ -102,6 +109,15 @@ Or directly:
 .venv/bin/python scripts/run_hunt.py --target 500 --languages en,pt,es,it,ru,ja,zh,ko,fr,de,ar
 ```
 
+For a serious multilingual run with local GitHub auth:
+
+```bash
+ODISSEO_GITHUB_TOKEN="$(gh auth token)" \
+.venv/bin/python scripts/run_hunt.py run \
+  --target 500 \
+  --languages en,pt,es,it,ru,ja,zh,ko,fr,de,ar,he,tr,id
+```
+
 ## Configuration
 
 The project reads environment in this order:
@@ -126,6 +142,16 @@ cp .env.local.example .env.local
 ```
 
 Keep real tokens only in ignored local files.
+
+Recent-search control is configured with:
+
+- `ODISSEO_X_LOOKBACK_DAYS`
+- `ODISSEO_X_WINDOW_HOURS`
+- `ODISSEO_X_REFRESH_LIVE_WINDOW`
+- `ODISSEO_QUERY_HISTORY_FILE`
+- `ODISSEO_QUERY_HISTORY_RETENTION_DAYS`
+
+The pipeline stores executed query windows in `cache/query_history.json` so older slices are skipped on subsequent runs while the newest live window can still be refreshed.
 
 ## Documentation
 

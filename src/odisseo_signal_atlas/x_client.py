@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -47,6 +47,8 @@ class XClient:
         query: str,
         max_results_per_page: int = 100,
         max_pages: int = 5,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> list[TweetHit]:
         """Search X and normalize returned tweets into ``TweetHit`` objects."""
 
@@ -56,11 +58,15 @@ class XClient:
         for _ in range(max_pages):
             params: dict[str, str | int] = {
                 "query": query,
-                "max_results": min(max_results_per_page, 100),
+                "max_results": max(10, min(max_results_per_page, 100)),
                 "tweet.fields": "created_at,lang,public_metrics,entities",
                 "expansions": "author_id",
                 "user.fields": "username",
             }
+            if start_time:
+                params["start_time"] = _format_x_datetime(start_time)
+            if end_time:
+                params["end_time"] = _format_x_datetime(end_time)
             if next_token:
                 params["next_token"] = next_token
 
@@ -101,3 +107,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _format_x_datetime(value: datetime) -> str:
+    """Serialize datetimes in the format expected by the X API."""
+
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

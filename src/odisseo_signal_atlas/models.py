@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from hashlib import sha256
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,26 @@ class QuerySpec:
     language: SearchLanguage
     topic_label: str
     query: str
+    window_label: str
+    start_time: datetime
+    end_time: datetime
+    is_live_window: bool = False
+
+    @property
+    def signature(self) -> str:
+        """Stable signature used for query history and deduplication."""
+
+        payload = "|".join(
+            [
+                self.language.code,
+                self.topic_label,
+                self.query,
+                self.window_label,
+                self.start_time.isoformat(),
+                self.end_time.isoformat(),
+            ]
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(slots=True)
@@ -82,9 +103,10 @@ class PipelineReport:
     """Summary emitted after a pipeline execution."""
 
     output_path: str
+    total_planned_queries: int
     total_queries: int
+    total_skipped_queries: int
     total_tweets: int
     total_candidates: int
     total_ranked: int
     site_url: str
-

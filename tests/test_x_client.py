@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 
@@ -89,4 +91,29 @@ def test_search_parses_tweets_and_paginates(monkeypatch: pytest.MonkeyPatch) -> 
     assert tweets[0].matched_query == "query"
     assert tweets[1].author_username == "bruno"
     assert tweets[1].created_at is not None
+    client.close()
+
+
+def test_search_passes_time_window_to_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[dict[str, str | int]] = []
+    client = XClient("token", "https://api.x.com/2/tweets/search/recent")
+
+    def fake_request(params: dict[str, str | int]) -> dict:
+        captured.append(params)
+        return {"data": [], "meta": {}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    client.search(
+        "query",
+        max_results_per_page=10,
+        max_pages=1,
+        start_time=datetime(2026, 3, 18, 0, 0, tzinfo=UTC),
+        end_time=datetime(2026, 3, 18, 12, 0, tzinfo=UTC),
+    )
+
+    assert captured
+    assert captured[0]["max_results"] == 10
+    assert "start_time" in captured[0]
+    assert "end_time" in captured[0]
     client.close()

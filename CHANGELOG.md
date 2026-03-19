@@ -12,3 +12,4 @@ All notable changes to `Odisseo Signal Atlas` will be documented in this file.
 - Engineering docs, ADRs, changelog, security policy, and contribution guide
 - Automated tests, lint configuration, and CI workflow
 - Public package metadata, license, and CLI-first ADR
+- Time-sliced query history, stronger language coverage, and replay-safe local runs

@@ -26,7 +26,12 @@ def _settings(tmp_path: Path) -> Settings:
         x_search_endpoint="https://api.x.com/2/tweets/search/recent",
         x_max_results_per_page=100,
         x_pages_per_query=5,
+        x_lookback_days=1,
+        x_window_hours=12,
+        x_refresh_live_window=True,
         target_repos=500,
+        query_history_file=tmp_path / "cache" / "query_history.json",
+        query_history_retention_days=30,
         excluded_repos=set(),
         search_languages=[
             SearchLanguage("en", "English", ("Claude Code",), ("memory",)),
@@ -48,7 +53,9 @@ class DummyPipeline:
         self.run_target = target_repos
         return PipelineReport(
             output_path=str(self.settings.output_file),
+            total_planned_queries=3,
             total_queries=3,
+            total_skipped_queries=0,
             total_tweets=5,
             total_candidates=4,
             total_ranked=2,

@@ -68,7 +68,9 @@ def _run_discovery(args: argparse.Namespace) -> None:
         pipeline.close()
 
     print(f"Output file: {report.output_path}")
+    print(f"Queries planned: {report.total_planned_queries}")
     print(f"Queries executed: {report.total_queries}")
+    print(f"Queries skipped from history: {report.total_skipped_queries}")
     print(f"Tweets analyzed: {report.total_tweets}")
     print(f"Candidates discovered: {report.total_candidates}")
     print(f"Repositories exported: {report.total_ranked}")
@@ -89,6 +91,8 @@ def _run_smoke(args: argparse.Namespace) -> None:
         pipeline.close()
 
     print(f"Smoke output file: {report.output_path}")
+    print(f"Queries planned: {report.total_planned_queries}")
+    print(f"Queries skipped from history: {report.total_skipped_queries}")
     print(f"Tweets analyzed: {report.total_tweets}")
     print(f"Repositories exported: {report.total_ranked}")
 

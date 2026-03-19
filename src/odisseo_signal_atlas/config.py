@@ -96,6 +96,24 @@ DEFAULT_LANGUAGES = [
         ("Claude Code", "Claude MCP", "Claude agent", "MCP server"),
         ("ذاكرة", "متعدد الوكلاء", "صوت", "RAG"),
     ),
+    SearchLanguage(
+        "he",
+        "Hebrew",
+        ("Claude Code", "Claude MCP", "סוכן Claude", "זיכרון Claude"),
+        ("זיכרון", "רב-סוכנים", "קול", "RAG"),
+    ),
+    SearchLanguage(
+        "tr",
+        "Turkish",
+        ("Claude Code", "Claude MCP", "Claude ajan", "Claude hafiza"),
+        ("hafiza", "coklu ajan", "ses", "rag"),
+    ),
+    SearchLanguage(
+        "id",
+        "Indonesian",
+        ("Claude Code", "Claude MCP", "agen Claude", "memori Claude"),
+        ("memori", "multi-agen", "suara", "rag"),
+    ),
 ]
 
 
@@ -115,7 +133,12 @@ class Settings:
     x_search_endpoint: str
     x_max_results_per_page: int
     x_pages_per_query: int
+    x_lookback_days: int
+    x_window_hours: int
+    x_refresh_live_window: bool
     target_repos: int
+    query_history_file: Path
+    query_history_retention_days: int
     excluded_repos: set[str]
     search_languages: list[SearchLanguage]
 
@@ -150,7 +173,17 @@ def load_settings(project_root: str | Path | None = None) -> Settings:
         ),
         x_max_results_per_page=int(os.getenv("ODISSEO_X_MAX_RESULTS_PER_PAGE", "100")),
         x_pages_per_query=int(os.getenv("ODISSEO_X_PAGES_PER_QUERY", "5")),
+        x_lookback_days=int(os.getenv("ODISSEO_X_LOOKBACK_DAYS", "3")),
+        x_window_hours=int(os.getenv("ODISSEO_X_WINDOW_HOURS", "12")),
+        x_refresh_live_window=_env_bool("ODISSEO_X_REFRESH_LIVE_WINDOW", default=True),
         target_repos=int(os.getenv("ODISSEO_TARGET_REPOS", "500")),
+        query_history_file=root / os.getenv(
+            "ODISSEO_QUERY_HISTORY_FILE",
+            "cache/query_history.json",
+        ),
+        query_history_retention_days=int(
+            os.getenv("ODISSEO_QUERY_HISTORY_RETENTION_DAYS", "30")
+        ),
         excluded_repos=set(DEFAULT_EXCLUDED_REPOS),
         search_languages=list(DEFAULT_LANGUAGES),
     )
@@ -161,3 +194,12 @@ def _load_env_file(path: Path) -> None:
 
     if path.exists():
         load_dotenv(path, override=False)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse boolean environment variables using common truthy values."""
+
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
