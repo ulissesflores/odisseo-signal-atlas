@@ -628,3 +628,101 @@ def test_pipeline_skips_known_recent_windows_and_continues_backwards(
     assert report.total_queries == 1
     assert report.days_scanned == 2
     assert calls == [f"memory query {older_now:%Y%m%d}"]
+
+
+def test_pipeline_writes_interrupted_report_from_ranked_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    language = SearchLanguage("en", "English", ("Claude Code",), ("memory",))
+    query = QuerySpec(
+        language=language,
+        topic_label="memory",
+        query="memory query",
+        window_label="20260318T0000Z-20260318T1200Z",
+        start_time=datetime(2026, 3, 18, 0, 0, tzinfo=UTC),
+        end_time=datetime(2026, 3, 18, 12, 0, tzinfo=UTC),
+        is_live_window=True,
+    )
+
+    settings = Settings(
+        app_name="Odisseo Signal Atlas",
+        environment="test",
+        project_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "output",
+        output_file=tmp_path / "output/report.md",
+        site_url="https://ulissesflores.com",
+        x_bearer_token="token",
+        github_token=None,
+        x_search_endpoint="https://api.x.com/2/tweets/search/recent",
+        x_max_results_per_page=10,
+        x_pages_per_query=1,
+        x_min_request_interval_seconds=0.0,
+        x_lookback_days=1,
+        x_max_backfill_days=1,
+        x_window_hours=12,
+        x_refresh_live_window=True,
+        x_rate_limit_default_wait_seconds=60,
+        x_rate_limit_max_wait_seconds=900,
+        target_repos=10,
+        candidate_target_multiplier=1.15,
+        query_history_file=tmp_path / "cache/query_history.json",
+        query_history_retention_days=30,
+        excluded_repos=set(),
+        search_languages=[language],
+    )
+    settings.cache_dir.mkdir(parents=True, exist_ok=True)
+    (settings.cache_dir / "ranked.json").write_text(
+        json.dumps(
+            [
+                {
+                    "repo_url": "https://github.com/acme/from-ranked-cache",
+                    "repo_slug": "acme/from-ranked-cache",
+                    "stars": 42,
+                    "primary_language": "Python",
+                    "description": "cached ranking",
+                    "topics": ["memory"],
+                    "html_url": "https://github.com/acme/from-ranked-cache",
+                    "updated_at": "2026-03-19T00:00:00+00:00",
+                    "pushed_at": "2026-03-19T00:00:00+00:00",
+                    "source_languages": ["en"],
+                    "matched_topics": ["memory"],
+                    "source_tweets": [],
+                    "score": 10,
+                    "rationale": "Signals detected: cached.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class InterruptingXClient:
+        def search(
+            self,
+            query: str,
+            max_results_per_page: int = 100,
+            max_pages: int = 5,
+            start_time: datetime | None = None,
+            end_time: datetime | None = None,
+        ) -> list[TweetHit]:
+            raise KeyboardInterrupt()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "odisseo_signal_atlas.pipeline.build_queries",
+        lambda *_args, **_kwargs: [query],
+    )
+
+    pipeline = OdisseoSignalAtlasPipeline(settings)
+    pipeline.x_client = cast(XClient, InterruptingXClient())
+    pipeline.github_client = cast(GitHubClient, DummyGitHubClient())
+
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.run(target_repos=10)
+
+    content = settings.output_file.read_text(encoding="utf-8")
+    assert "**Run status:** interrupted" in content
+    assert "acme/from-ranked-cache" in content

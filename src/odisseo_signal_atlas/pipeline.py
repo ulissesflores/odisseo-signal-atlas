@@ -61,13 +61,14 @@ class OdisseoSignalAtlasPipeline:
             retention_days=self.settings.query_history_retention_days,
         )
         candidates = self._load_candidates(self.settings.cache_dir / "candidates.json")
+        cached_ranked = self._load_ranked(self.settings.cache_dir / "ranked.json")
         queries: list[QuerySpec] = []
         total_tweets = 0
         skipped_queries = 0
         executed_queries = 0
         days_scanned = 0
         self._write_report_snapshot(
-            repos=[],
+            repos=cached_ranked[:limit],
             run_status="running",
             stats=self._build_report_stats(
                 total_planned_queries=0,
@@ -144,7 +145,7 @@ class OdisseoSignalAtlasPipeline:
 
                 days_scanned += batch_lookback_days
                 self._write_report_snapshot(
-                    repos=[],
+                    repos=cached_ranked[:limit],
                     run_status="running",
                     stats=self._build_report_stats(
                         total_planned_queries=len(queries),
@@ -157,15 +158,16 @@ class OdisseoSignalAtlasPipeline:
                     ),
                     notes=[
                         (
-                            "Progress snapshot only. The final ranked report is written after "
-                            "GitHub enrichment finishes."
+                            "Progress snapshot. Ranked entries shown here come from the last "
+                            "completed enrichment cache until the current run finishes."
                         ),
                     ],
                 )
-        except Exception as exc:
+        except BaseException as exc:
+            run_status = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
             self._write_report_snapshot(
-                repos=[],
-                run_status="failed",
+                repos=cached_ranked[:limit],
+                run_status=run_status,
                 stats=self._build_report_stats(
                     total_planned_queries=len(queries),
                     total_queries=executed_queries,
@@ -175,7 +177,13 @@ class OdisseoSignalAtlasPipeline:
                     days_scanned=days_scanned,
                     target_repos=limit,
                 ),
-                notes=[f"Run stopped before final enrichment. Reason: {exc}"],
+                notes=[
+                    (
+                        "The current run stopped before final enrichment. "
+                        f"Reason: {exc or run_status}."
+                    ),
+                    "The ranked entries shown below come from the most recent completed cache.",
+                ],
             )
             raise
 
@@ -311,6 +319,58 @@ class OdisseoSignalAtlasPipeline:
                 },
             )
         return candidates
+
+    def _load_ranked(self, path: Path) -> list[RepoRecord]:
+        """Load the last completed ranked output for fallback report rendering."""
+
+        if not path.exists():
+            return []
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            return []
+
+        repos: list[RepoRecord] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            repo_slug = item.get("repo_slug")
+            repo_url = item.get("repo_url")
+            if not isinstance(repo_slug, str) or not isinstance(repo_url, str):
+                continue
+            description = item.get("description")
+            html_url = item.get("html_url")
+            rationale = item.get("rationale")
+            repos.append(
+                RepoRecord(
+                    repo_url=repo_url,
+                    repo_slug=repo_slug,
+                    stars=int(item.get("stars", 0)),
+                    primary_language=item.get("primary_language")
+                    if isinstance(item.get("primary_language"), str)
+                    else None,
+                    description=description if isinstance(description, str) else "",
+                    topics=[
+                        topic for topic in item.get("topics", []) if isinstance(topic, str)
+                    ],
+                    html_url=html_url if isinstance(html_url, str) else repo_url,
+                    updated_at=self._parse_cached_datetime(item.get("updated_at")),
+                    pushed_at=self._parse_cached_datetime(item.get("pushed_at")),
+                    source_languages=[
+                        lang
+                        for lang in item.get("source_languages", [])
+                        if isinstance(lang, str)
+                    ],
+                    matched_topics=[
+                        topic
+                        for topic in item.get("matched_topics", [])
+                        if isinstance(topic, str)
+                    ],
+                    source_tweets=[],
+                    score=float(item.get("score", 0.0)),
+                    rationale=rationale if isinstance(rationale, str) else "",
+                )
+            )
+        return repos
 
     def _serialize_candidates(
         self,
