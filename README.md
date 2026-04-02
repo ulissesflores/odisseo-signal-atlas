@@ -4,48 +4,42 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-Official engineering repository for the `Odisseo Signal Atlas` discovery engine by [Ulisses Flores](https://ulissesflores.com).
+`Odisseo Signal Atlas` is a local-first discovery engine for finding frontier GitHub repositories from real social signals.
 
-Odisseo Signal Atlas is a multilingual discovery pipeline that searches the `X` API, extracts GitHub repositories from real social signals, enriches them with GitHub metadata, scores them against frontier engineering criteria, and exports a public-quality Markdown report.
+It searches recent windows on the `X` API, extracts GitHub repositories mentioned in those conversations, enriches them with GitHub metadata, ranks them against frontier-engineering heuristics, and exports reproducible Markdown reports for curation and follow-up review.
 
-It is designed to backfill recent search windows without pointlessly repeating the same historical queries on every run. It also persists resumable candidate state, writes a Markdown report for every run, and respects X rate-limit windows instead of discarding a long execution when the API asks for a cooldown.
+The pipeline is built for long-running multilingual discovery: it tracks which recent-search windows have already been scanned, persists candidate state incrementally, survives `429` rate-limit pauses, and supports a sequential human-review workflow over the ranked cache without issuing new `X` requests.
 
-When the X API is rate-limited, the repository also supports a sequential human-review mode that inspects one GitHub repository at a time from the ranked cache, without issuing new X requests.
+## At a glance
 
-## Public positioning
-
-- Brand: `Odisseo`
 - Product: `Odisseo Signal Atlas`
+- Brand: `Odisseo`
 - Site: [ulissesflores.com](https://ulissesflores.com)
-- Distribution goal: SEO, GEO, and LLM-friendly public repository
-- Operating model: local-first, environment-driven, reproducible, testable
-- Delivery surface: CLI-first, no notebook dependency
+- Runtime surface: local-first Python CLI
+- Package status: `0.1.0` alpha
+- Primary outputs:
+  - `output/odisseo-signal-atlas-report.md`
+  - `output/repo-insights/`
+- Core commands:
+  - `run`
+  - `smoke`
+  - `inspect`
+  - `inspect-next`
 
-## What This Repository Is
+## What it does
 
-This repository is intentionally structured like a public software product, not a throwaway script. That means source code, tests, docs, ADRs, CI, security policy, templates, and release metadata all live here on purpose.
+- Builds multilingual search queries across engineering and OSS topics
+- Scans recent `X` windows while avoiding already searched slices via `cache/query_history.json`
+- Normalizes GitHub links into canonical repository slugs
+- Enriches repositories with GitHub metadata and heuristic scoring
+- Writes a public-quality Markdown report for every run
+- Persists candidate and inspection state so long executions can resume
 
-Tracked public files stay relatively small. Local-only artifacts such as `.venv`, cache files, `.env.local`, smoke outputs, and editor cruft are ignored and are not part of the public repository surface.
+## Why this repository exists
 
-## Scope
+Most discovery workflows for frontier tooling are either ad hoc social browsing or brittle one-shot scripts. Odisseo Signal Atlas is meant to be the middle ground: a repeatable local workflow that can keep backfilling recent signal windows, produce traceable reports, and turn raw social chatter into a ranked repository shortlist.
 
-- Multilingual query generation for `en`, `pt`, `es`, `it`, `ru`, `ja`, `zh`, `ko`, `fr`, `de`, `ar`, `he`, `tr`, and `id`
-- Real X API discovery
-- GitHub repository normalization and enrichment
-- Heuristic ranking for hidden gems, experimental repos, MCP servers, memory systems, multi-agent stacks, and adjacent frontier tooling
-- Time-sliced recent-search execution with persistent query history
-- Markdown export with canonical site link back to [Ulisses Flores](https://ulissesflores.com)
-
-## Engineering standards
-
-- Environment layering: `.env`, `.env.local`, `.env.production`
-- Local-first execution
-- Automated tests
-- Static quality gates
-- ADRs and architecture documentation
-- Security guidance for public operation
-- Changelog and contribution flow
-- Public metadata and licensing for open distribution
+It is intentionally structured like a maintained software product rather than a throwaway notebook. Source code, tests, ADRs, CI, security guidance, and release metadata all live here because the repository is part of the deliverable.
 
 ## Quick start
 
@@ -60,74 +54,50 @@ Populate secrets locally:
 - `ODISSEO_X_BEARER_TOKEN`
 - `ODISSEO_GITHUB_TOKEN` for sustained enrichment runs
 
-## Language strategy
-
-The default language matrix mixes globally relevant developer languages with communities that are especially active on X for tooling, OSS, and AI engineering discourse. That is why the defaults include Japanese, Brazilian Portuguese, Hebrew, Turkish, and Indonesian in addition to the usual English-centric set.
-
-## Runtime surfaces
-
-- `requirements.txt`: production dependencies
-- `requirements-dev.txt`: local engineering stack
-- `pyproject.toml`: package metadata, tooling, coverage gate, CLI entrypoint
-- `Makefile`: deterministic local commands
-- `scripts/run_hunt.py`: thin local launcher
-- `src/odisseo_signal_atlas/`: core product code
-- `tests/`: automated regression suite
-- `docs/adr/`: architectural decisions for public maintenance
-
-## Repository layout
-
-```text
-src/odisseo_signal_atlas/   application package
-tests/                      regression and integration-style tests
-scripts/                    local launchers
-docs/adr/                   architecture decisions
-.github/                    CI, templates, repository governance
-```
-
-## Local execution model
-
-Notebook-based execution is intentionally out of scope. The repository is designed for:
-
-- local CLI execution
-- explicit environment files
-- reproducible CI runs
-- versioned software engineering artifacts
-- public release hygiene
-
-## Commands
+Run a constrained smoke pass first:
 
 ```bash
-make lint
-make test
-make typecheck
-make smoke
-make run
+ODISSEO_X_BEARER_TOKEN="..." \
+ODISSEO_GITHUB_TOKEN="$(gh auth token)" \
+.venv/bin/python scripts/run_hunt.py smoke --target 10 --languages en,pt,es
 ```
 
-Or directly:
+Then run a larger multilingual discovery:
 
 ```bash
-.venv/bin/python scripts/run_hunt.py --target 500 --languages en,pt,es,it,ru,ja,zh,ko,fr,de,ar
-```
-
-For a serious multilingual run with local GitHub auth:
-
-```bash
+ODISSEO_X_BEARER_TOKEN="..." \
 ODISSEO_GITHUB_TOKEN="$(gh auth token)" \
 .venv/bin/python scripts/run_hunt.py run \
   --target 500 \
   --languages en,pt,es,it,ru,ja,zh,ko,fr,de,ar,he,tr,id
 ```
 
-Sequential inspection mode after discovery:
+Continue review without calling the `X` API again:
 
 ```bash
 .venv/bin/python scripts/run_hunt.py inspect-next
 .venv/bin/python scripts/run_hunt.py inspect --repo https://github.com/owner/repo
 ```
 
-Those commands use the ranked cache plus GitHub metadata only. They do not call the X API, which makes them useful while waiting for the next X rate-limit reset window.
+Those inspection commands read the ranked cache plus GitHub metadata only. They are useful while waiting for the next `X` rate-limit reset window.
+
+## Pipeline
+
+1. Load layered configuration from environment files and process environment
+2. Generate multilingual recent-search queries over tooling and engineering topics
+3. Walk backward through recent windows until the target or backfill ceiling is reached
+4. Skip windows already recorded in `cache/query_history.json`
+5. Extract GitHub links from `X`, normalize repository slugs, and enrich metadata from GitHub
+6. Rank candidates and export a Markdown report
+7. Persist candidate and inspection state for resumable discovery and sequential review
+
+## Outputs
+
+- `output/odisseo-signal-atlas-report.md`: main discovery report for each run
+- `output/repo-insights/`: one Markdown analysis per manually reviewed repository
+- `cache/query_history.json`: replay-safe history of scanned search windows
+- `cache/candidates.json`: incremental repository candidate cache
+- `cache/inspection_state.json`: state for `inspect-next`
 
 ## Configuration
 
@@ -146,13 +116,6 @@ See:
 - [.env.local.example](.env.local.example)
 - [.env.production.example](.env.production.example)
 
-Recommended local setup:
-
-```bash
-cp .env.example .env
-cp .env.local.example .env.local
-```
-
 Keep real tokens only in ignored local files.
 
 Recent-search control is configured with:
@@ -170,19 +133,40 @@ Recent-search control is configured with:
 - `ODISSEO_REPO_INSIGHTS_DIR`
 - `ODISSEO_QUERY_HISTORY_RETENTION_DAYS`
 
-The pipeline stores executed query windows in `cache/query_history.json` so older slices are skipped on subsequent runs while the newest live window can still be refreshed.
-
-Discovered candidates are also persisted incrementally in `cache/candidates.json`. That allows an interrupted or rate-limited run to resume without losing already discovered repository signals.
-
-Sequential repository reviews are persisted in `cache/inspection_state.json`, while the per-repository Markdown analyses are written to `output/repo-insights/`.
-
 If a run does not find enough repositories within the first recent-search slice, the pipeline keeps moving backward in time until it reaches the configured backfill limit. Every run writes a Markdown file, including progress or failure snapshots when final enrichment has not completed yet.
 
-Backfill semantics are strict:
+## Language strategy
 
-- every run starts from the current UTC anchor and moves backward
-- if a time window is already present in `cache/query_history.json`, that window is skipped
-- skipped windows still advance the cursor, so the pipeline keeps walking backward instead of looping on already searched days
+The default language matrix mixes globally relevant developer languages with communities that are especially active on `X` for tooling, OSS, and AI engineering discourse. That is why the defaults include Japanese, Brazilian Portuguese, Hebrew, Turkish, and Indonesian alongside English-centric search terms.
+
+## Engineering and maintenance
+
+- Environment layering: `.env`, `.env.local`, `.env.production`
+- Local-first execution with no notebook dependency
+- Automated tests, lint, and type-check gates
+- ADRs and architecture documentation
+- Security guidance for public operation
+- Public metadata and release hygiene
+
+Common local commands:
+
+```bash
+make lint
+make test
+make typecheck
+make smoke
+make run
+```
+
+## Repository layout
+
+```text
+src/odisseo_signal_atlas/   application package
+tests/                      regression and integration-style tests
+scripts/                    local launchers
+docs/adr/                   architecture decisions
+.github/                    CI, templates, repository governance
+```
 
 ## Documentation
 
